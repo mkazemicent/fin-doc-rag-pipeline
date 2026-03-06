@@ -2,6 +2,7 @@ import os
 import glob
 import logging
 from pathlib import Path
+from .hash_tracker import IngestionTracker
 from langchain_community.document_loaders import PyPDFLoader
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
@@ -102,6 +103,10 @@ def process_documents(raw_dir: str, processed_dir: str):
     
     # Ensure the output directory exists, creating parents if necessary
     processed_path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize the incremental ingestion tracker (SQLite + SHA-256)
+    db_path = str(raw_path.parent / "ingestion_state.db")
+    tracker = IngestionTracker(db_path)
     
     # Find all PDF files in the raw directory
     pdf_files = list(raw_path.glob("*.pdf"))
@@ -118,6 +123,11 @@ def process_documents(raw_dir: str, processed_dir: str):
     for pdf_file in pdf_files:
         logger.info(f"Processing started for file: {pdf_file.name}")
         
+        # --- Incremental Ingestion Gate ---
+        if tracker.is_already_processed(str(pdf_file)):
+            logger.info(f"SKIPPED (already processed, unchanged): {pdf_file.name}")
+            continue
+
         try:
             # Construct the output .txt file path
             output_file = processed_path / f"{pdf_file.stem}.txt"
@@ -140,8 +150,14 @@ def process_documents(raw_dir: str, processed_dir: str):
                 
             logger.info(f"Successfully processed and saved masked content to: {output_file.name}")
             
+            # Record this file as successfully processed
+            tracker.mark_as_processed(str(pdf_file))
+            
         except Exception as e:
             logger.error(f"Error processing {pdf_file.name}: {e}")
+
+    # Close the tracker database connection
+    tracker.close()
 
 if __name__ == "__main__":
     # Resolve the project root path based on the current file's location 

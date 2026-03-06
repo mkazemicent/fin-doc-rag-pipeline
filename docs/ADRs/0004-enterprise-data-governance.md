@@ -23,3 +23,18 @@ We are implementing a comprehensive Data Governance layer consisting of three co
 **Negative / Trade-offs:**
 * **Architectural Complexity:** Requires maintaining a secondary state-tracking database (SQLite/JSON) alongside ChromaDB to manage file hashes and metadata.
 * **Ingestion Overhead:** Hashing files and cross-referencing the database adds a minor computational step prior to the Presidio NLP masking process.
+
+graph TD
+    A[User Uploads PDF via UI] --> B[Calculate SHA-256 File Hash]
+    B --> C{Check SQLite Hash Tracker}
+    
+    C -- Hash Exists --> D[Skip Processing: Document Already in DB]
+    
+    C -- Hash is New --> E[Extract Text & Mask PII]
+    E --> F[Chunk Document]
+    F --> G[Generate Local Embeddings]
+    G --> H[(Append to ChromaDB)]
+    H --> I[(Save New Hash to SQLite)]
+    
+    I --> J[UI: Ingestion Complete]
+    D --> J

@@ -19,7 +19,7 @@ The Deal Analytics Pipeline requires more than simple semantic search (naive RAG
 **Negative / Trade-offs:**
 * **Complexity:** LangGraph introduces a steeper learning curve and more boilerplate code compared to standard LangChain sequential chains.
 * **Debugging Overhead:** Tracking the exact path an agent took through a graph-based state machine requires more rigorous logging and evaluation.
-
+```mermaid
 stateDiagram-v2
     direction TB
     [*] --> RewriteNode : User Question
@@ -45,3 +45,4 @@ stateDiagram-v2
     }
     
     GenerateNode --> [*] : Final Answer & Citations
+```

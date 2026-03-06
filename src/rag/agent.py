@@ -18,6 +18,7 @@ class AgentState(TypedDict):
     optimized_query: str
     context: str
     answer: str
+    retry_count: int  # --- NEW: Tracks self-correction loops ---
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CHROMA_DB_DIR = PROJECT_ROOT / "data" / "chroma_db"
@@ -92,19 +93,79 @@ def generate_node(state: AgentState):
     answer = chain.invoke({"context": context, "question": question})
     return {"answer": answer}
 
+# --- NEW NODES & ROUTING FOR PHASE 4 ---
+
+def grade_context_node(state: AgentState):
+    """Node 4: Evaluates if the retrieved context is relevant to the question."""
+    logger.info("--- NODE: GRADING RETRIEVED CONTEXT ---")
+    question = state["question"]
+    context = state["context"]
+    retry_count = state.get("retry_count", 0)
+
+    llm = ChatOllama(model="llama3.1", temperature=0)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a quality control agent for a RAG pipeline. "
+                   "Your job is to evaluate if the provided context is relevant to the user's question. "
+                   "If the context contains information that helps answer the question, output 'yes'. "
+                   "If the context is irrelevant or lacks the necessary details, output 'no'. "
+                   "Output ONLY the word 'yes' or 'no'. No explanation."),
+        ("human", "Question: {question} \n\nContext: {context}")
+    ])
+
+    chain = prompt | llm | StrOutputParser()
+    score = chain.invoke({"question": question, "context": context}).strip().lower()
+
+    if "yes" in score:
+        logger.info(f"Context Grade: RELEVANT (Loop count: {retry_count})")
+        return {"answer": "relevant"} # We use 'answer' field as a temporary signal
+    else:
+        logger.warning(f"Context Grade: IRRELEVANT (Loop count: {retry_count})")
+        return {"answer": "irrelevant", "retry_count": retry_count + 1}
+
+def decide_to_generate(state: AgentState):
+    """Routing Function: Determines whether to try again or generate the final answer."""
+    logger.info("--- ROUTING: DECIDING NEXT STEP ---")
+    
+    # We use the signal passed in the 'answer' field from grade_context_node
+    signal = state.get("answer", "irrelevant")
+    retry_count = state.get("retry_count", 0)
+
+    if signal == "relevant":
+        logger.info("Decision: Proceed to GENERATE.")
+        return "generate"
+    
+    if retry_count < 3:
+        logger.warning(f"Decision: REWRITE query (Attempt {retry_count}/3).")
+        return "rewrite"
+    else:
+        logger.error("Decision: MAX RETRIES REACHED. Proceeding to generate failure message.")
+        return "generate"
+
 def build_agent():
-    logger.info("Building LangGraph State Machine...")
+    logger.info("Building LangGraph State Machine with Self-Correction Loop...")
     workflow = StateGraph(AgentState)
     
-    # Add our 3 nodes
+    # Add nodes
     workflow.add_node("rewrite", rewrite_node)
     workflow.add_node("retrieve", retrieve_node)
+    workflow.add_node("grade_context", grade_context_node) # --- NEW ---
     workflow.add_node("generate", generate_node)
     
-    # Define the new flow
+    # Define the sophisticated flow
     workflow.add_edge(START, "rewrite")
     workflow.add_edge("rewrite", "retrieve")
-    workflow.add_edge("retrieve", "generate")
+    workflow.add_edge("retrieve", "grade_context") # --- NEW: Intercept before generation ---
+    
+    # --- DYNAMIC ROUTING ---
+    workflow.add_conditional_edges(
+        "grade_context",
+        decide_to_generate,
+        {
+            "rewrite": "rewrite",
+            "generate": "generate"
+        }
+    )
+    
     workflow.add_edge("generate", END)
     
     return workflow.compile()

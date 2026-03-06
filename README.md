@@ -18,7 +18,7 @@ This pipeline utilizes an Agentic Retrieval-Augmented Generation (RAG) architect
 * **Evaluation Framework:** RAGAS (Context Precision & Faithfulness tracking)
 * **User Interface:** Streamlit
 
-
+```mermaid
 graph TD
     subgraph "Data Ingestion & Privacy Layer"
         A[Raw SEDAR+ PDFs] --> B(PyPDFLoader)
@@ -38,6 +38,7 @@ graph TD
         J <--> |Search Query| H
         J <--> |Context & Prompt| K(Ollama: Llama 3.1 8B)
     end
+```
 ## Key Features
 * **Compliance-First Ingestion:** All documents are passed through a zero-trust PII masking layer before any data is embedded or sent to an LLM.
 * **Agentic Retrieval:** Utilizes LangGraph to give the AI specific "tools" (Term Extractor, Risk Assessor, Summarizer) rather than relying on standard, linear semantic search.

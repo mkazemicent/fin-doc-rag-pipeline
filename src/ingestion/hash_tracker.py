@@ -122,6 +122,30 @@ class IngestionTracker:
         self.conn.commit()
         logger.info(f"IngestionTracker: recorded {filename} (hash: {file_hash[:12]}...)")
 
+    def remove_from_tracker(self, filename: str) -> bool:
+        """
+        Delete a file's hash record from the database.
+
+        Args:
+            filename: The name of the file to remove (e.g., 'amerigo_2015.pdf').
+
+        Returns:
+            True if a record was deleted, False if the filename was not found.
+        """
+        cursor = self.conn.execute(
+            "DELETE FROM processed_files WHERE filename = ?",
+            (filename,),
+        )
+        self.conn.commit()
+        deleted_count = cursor.rowcount
+        
+        if deleted_count > 0:
+            logger.info(f"IngestionTracker: removed {filename} from tracking.")
+            return True
+        else:
+            logger.warning(f"IngestionTracker: {filename} not found in database.")
+            return False
+
     def close(self) -> None:
         """Close the underlying SQLite connection."""
         self.conn.close()

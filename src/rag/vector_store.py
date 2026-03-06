@@ -14,6 +14,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def get_chroma_instance(persist_directory: str):
+    """
+    Initializes a ChromaDB instance with the local mxbai-embed-large embedding model.
+    """
+    embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    return Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+
 def initialize_vector_store():
     """
     Reads processed .txt files, chunks them, generates fully local Ollama embeddings,
@@ -43,9 +50,16 @@ def initialize_vector_store():
     documents = []
     for txt_file in txt_files:
         loader = TextLoader(str(txt_file), encoding="utf-8")
-        documents.extend(loader.load())
+        loaded_docs = loader.load()
         
-    logger.info(f"Loaded {len(documents)} document(s).")
+        # Metadata Normalization: Convert full .txt path to original .pdf filename
+        for doc in loaded_docs:
+            source_path = Path(doc.metadata.get("source", ""))
+            doc.metadata["source"] = source_path.stem + ".pdf"
+            
+        documents.extend(loaded_docs)
+        
+    logger.info(f"Loaded {len(documents)} document(s) with normalized 'source' metadata.")
 
     # 3. Chunking Strategy
     logger.info("Initializing RecursiveCharacterTextSplitter (Size: 500, Overlap: 50)")
@@ -63,8 +77,8 @@ def initialize_vector_store():
     embeddings = OllamaEmbeddings(model="mxbai-embed-large")
 
     # 5. Initialize Empty Vector Store
-    logger.info(f"Initializing empty ChromaDB at {CHROMA_DB_DIR}")
-    vectorstore = Chroma(persist_directory=str(CHROMA_DB_DIR), embedding_function=embeddings)
+    logger.info(f"Initializing/Accessing ChromaDB at {CHROMA_DB_DIR}")
+    vectorstore = get_chroma_instance(str(CHROMA_DB_DIR))
 
     # 6. Robust Batch Processing
     # We send 50 chunks at a time to prevent overloading the local GPU/Ollama server
@@ -97,11 +111,46 @@ def initialize_vector_store():
         results = vectorstore.similarity_search(test_query, k=1)
         if results:
             preview = results[0].page_content[:150].replace('\n', ' ')
-            logger.info(f"Sanity check passed. Top result snippet: {preview}...")
+            source = results[0].metadata.get("source", "Unknown")
+            logger.info(f"Sanity check passed. Top result from '{source}': {preview}...")
         else:
             logger.warning("Sanity check query returned no results.")
     except Exception as e:
          logger.error(f"Sanity check failed. Error: {e}")
+
+def delete_document_from_db(filename: str, chroma_dir: str = None):
+    """
+    Purges all chunks associated with a specific document (source filename) from ChromaDB.
+
+    Args:
+        filename: Bare original PDF filename (e.g., 'amerigo_2015.pdf').
+        chroma_dir: Optional path override for Chroma persistence.
+    """
+    if not chroma_dir:
+        PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+        chroma_dir = str(PROJECT_ROOT / "data" / "chroma_db")
+
+    logger.info(f"Deleting all chunks for '{filename}' from ChromaDB at {chroma_dir}")
+    
+    vectorstore = get_chroma_instance(chroma_dir)
+    
+    # LangChain's Chroma.delete(where=...) has inconsistent support. 
+    # Reliable pattern: get IDs -> delete by ID.
+    try:
+        matches = vectorstore.get(where={"source": filename})
+        matching_ids = matches.get("ids", [])
+        
+        if matching_ids:
+            vectorstore.delete(ids=matching_ids)
+            logger.info(f"Successfully deleted {len(matching_ids)} chunks for '{filename}'.")
+            return len(matching_ids)
+        else:
+            logger.warning(f"No chunks found in database for document: '{filename}'")
+            return 0
+            
+    except Exception as e:
+        logger.error(f"Failed to delete document '{filename}': {e}")
+        return 0
 
 if __name__ == "__main__":
     try:

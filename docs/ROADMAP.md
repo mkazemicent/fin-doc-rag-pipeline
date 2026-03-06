@@ -15,7 +15,7 @@ This document outlines the planned upgrades for the Enterprise Deal Analyzer pip
 
 ## Phase 3: Enterprise Data Governance (Upcoming)
 - [x] **Incremental Ingestion:** Implement file hashing (SQLite/JSON) to allow dynamic, on-the-fly document uploads without reprocessing the entire dataset.
-- [ ] **Document Lifecycle & Deletion (TTL):** Tag all ChromaDB chunks with unique document IDs to allow targeted deletion of specific contracts.
+- [x] **Document Lifecycle & Deletion (TTL):** Tag all ChromaDB chunks with unique document IDs to allow targeted deletion of specific contracts.
 - [ ] **Role-Based Access Control (RBAC):** Draft the security model for isolating deal access between different analyst teams.
 
 ## Phase 4: Advanced Retrieval & Dynamic Routing (Upcoming)

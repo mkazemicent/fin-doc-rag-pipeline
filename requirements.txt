@@ -13,3 +13,5 @@ langchain-chroma
 langchain-community
 spacy
 langchain-ollama
+pytest
+pytest-cov

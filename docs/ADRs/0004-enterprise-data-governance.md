@@ -23,7 +23,7 @@ We are implementing a comprehensive Data Governance layer consisting of three co
 **Negative / Trade-offs:**
 * **Architectural Complexity:** Requires maintaining a secondary state-tracking database (SQLite/JSON) alongside ChromaDB to manage file hashes and metadata.
 * **Ingestion Overhead:** Hashing files and cross-referencing the database adds a minor computational step prior to the Presidio NLP masking process.
-
+```mermaid
 graph TD
     A[User Uploads PDF via UI] --> B[Calculate SHA-256 File Hash]
     B --> C{Check SQLite Hash Tracker}
@@ -38,3 +38,4 @@ graph TD
     
     I --> J[UI: Ingestion Complete]
     D --> J
+```

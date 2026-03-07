@@ -211,3 +211,4 @@ debug_context.txt
 ingestion_state.db
 .env
 test_live_routing.py
+GEMINI.md

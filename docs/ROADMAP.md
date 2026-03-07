@@ -21,10 +21,10 @@ This document outlines the planned upgrades for the Enterprise Deal Analyzer pip
 ## Phase 4: Advanced Retrieval & Dynamic Routing (Upcoming)
 - [ ] **Agentic / Semantic Chunking:** Replace `RecursiveCharacterTextSplitter` with an NLP model to dynamically split chunks based on topic/meaning.
 - [ ] **Hybrid Search:** Implement BM25 (keyword search) alongside Vector (semantic) search to guarantee exact document ID retrieval.
-- [ ] **Dynamic LangGraph Routing:** Add a "Grade Context" self-correction loop to retry searches if the initial retrieval fails.
+- [x] **Dynamic LangGraph Routing:** Add a "Grade Context" self-correction loop to retry searches if the initial retrieval fails.
 
 ## Phase 5: Enterprise UI & Deployment (Upcoming)
-- [ ] Build a frontend Streamlit dashboard featuring system diagnostics and status indicators.
-- [ ] Implement "Rock-Solid Citations" with expandable context panels showing exact source documents.
+- [x] **Enterprise UI:** Build a frontend Streamlit dashboard featuring system diagnostics and status indicators.
+- [x] **Rock-Solid Citations:** Implement expandable context panels showing exact source documents.
 - [ ] Add an "Export to Memo" feature for analysts to download generated insights.
 - [ ] Containerize the application using Docker for secure, isolated deployment.

@@ -18,7 +18,8 @@ class AgentState(TypedDict):
     optimized_query: str
     context: str
     answer: str
-    retry_count: int  # --- NEW: Tracks self-correction loops ---
+    retry_count: int
+    chat_history: list  # --- NEW: Stores LangChain messages ---
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CHROMA_DB_DIR = PROJECT_ROOT / "data" / "chroma_db"
@@ -33,7 +34,6 @@ def rewrite_node(state: AgentState):
     """Node 1: Rewrites the user's prompt to be highly optimized for Vector Search."""
     logger.info("--- NODE: OPTIMIZING SEARCH QUERY ---")
     question = state["question"]
-    
     llm = ChatOllama(model="llama3.1", temperature=0)
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are a strictly constrained data extraction script. Your ONLY job is to extract financial keywords from a user query to use in a vector database search.
@@ -41,12 +41,17 @@ def rewrite_node(state: AgentState):
         RULES:
         1. NEVER write conversational text (e.g., "Here is the query", "I am an expert").
         2. If the user asks a non-financial question (like recipes or weather), output exactly the word: IRRELEVANT_QUERY
-        3. Output ONLY the raw keywords separated by spaces.
+        3. Use the provided chat history to resolve references (like 'it', 'above', or 'that agreement').
+        4. Output ONLY the raw keywords separated by spaces.
         """),
+        ("placeholder", "{chat_history}"),
         ("human", "Optimize this question: {question}")
     ])
     chain = prompt | llm | StrOutputParser()
-    optimized = chain.invoke({"question": question}).strip()
+    optimized = chain.invoke({
+        "question": question,
+        "chat_history": state.get("chat_history", [])
+    }).strip()
     
     # --- SENIOR ENGINEER FALLBACK ---
     if not optimized:
@@ -86,13 +91,19 @@ def generate_node(state: AgentState):
         ("system", "You are a Senior Deal Desk Analyst at a major Canadian Bank. "
                    "Your job is to read unstructured corporate contracts and extract precise financial terms. "
                    "Answer the user's question based ONLY on the following context. "
+                   "Incorporate the ongoing conversation history for continuity. "
                    "If the answer is not in the context, explicitly state: 'I cannot find this information in the provided deal documents.' "
                    "Do not guess. Do not hallucinate. \n\nContext:\n{context}"),
+        ("placeholder", "{chat_history}"),
         ("human", "{question}")
     ])
     
     chain = prompt | llm | StrOutputParser()
-    answer = chain.invoke({"context": context, "question": question})
+    answer = chain.invoke({
+        "context": context, 
+        "question": question,
+        "chat_history": state.get("chat_history", [])
+    })
     return {"answer": answer}
 
 # --- NEW NODES & ROUTING FOR PHASE 4 ---

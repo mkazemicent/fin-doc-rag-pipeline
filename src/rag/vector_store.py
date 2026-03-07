@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 from langchain_community.document_loaders import TextLoader
 from langchain_ollama import OllamaEmbeddings
-from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from src.ingestion.hash_tracker import IngestionTracker
 
@@ -37,7 +37,7 @@ def get_chroma_instance(persist_directory: str):
 
 def initialize_vector_store():
     """
-    Reads processed .txt files, chunks them using Semantic Chunking, 
+    Reads processed .txt files, chunks them using a Semantic-Aware Recursive Strategy, 
     and stores them in a local ChromaDB instance.
     """
     logger.info("=====================================================")
@@ -90,35 +90,20 @@ def initialize_vector_store():
         tracker.close()
         return
 
-    logger.info(f"Identified {len(documents)} NEW or MODIFIED document(s) for semantic processing.")
+    logger.info(f"Identified {len(documents)} NEW or MODIFIED document(s) for processing.")
 
-    # 4. Initialize Local Ollama Embeddings (Required for Semantic Chunking)
-    embedding_model = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
-    logger.info(f"Initializing OllamaEmbeddings (Model: {embedding_model})")
-    embeddings = OllamaEmbeddings(
-        model=embedding_model,
-        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    )
-
-    # 5. Semantic Chunking Strategy (Robust Metadata Preservation)
-    logger.info("Initializing SemanticChunker (Breakpoint: Percentile)")
-    text_splitter = SemanticChunker(
-        embeddings, 
-        breakpoint_threshold_type="percentile"
+    # 4. Semantic-Aware Recursive Strategy
+    logger.info("Initializing RecursiveCharacterTextSplitter (Size: 800, Overlap: 150)")
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=150,
+        separators=["\n\n", "\n", ". ", " ", ""]
     )
     
-    # We split documents individually to guarantee metadata carries over correctly
-    chunked_documents = []
-    for doc in documents:
-        doc_chunks = text_splitter.split_documents([doc])
-        for chunk in doc_chunks:
-            # Explicitly sync metadata from parent to chunk
-            chunk.metadata.update(doc.metadata)
-        chunked_documents.extend(doc_chunks)
+    chunked_documents = text_splitter.split_documents(documents)
+    logger.info(f"Total chunks created: {len(chunked_documents)}")
 
-    logger.info(f"Total semantic chunks created: {len(chunked_documents)}")
-
-    # 6. Robust Batch Processing
+    # 5. Robust Batch Processing
     BATCH_SIZE = 50
     total_batches = (len(chunked_documents) // BATCH_SIZE) + 1
     

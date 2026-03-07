@@ -35,7 +35,7 @@ def get_retriever():
         base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     )
     vectorstore = Chroma(persist_directory=str(CHROMA_DB_DIR), embedding_function=embeddings)
-    return vectorstore.as_retriever(search_kwargs={"k": 20})
+    return vectorstore.as_retriever(search_kwargs={"k": 8})
 
 # 2. THE NEW REWRITE NODE
 def rewrite_node(state: AgentState):
@@ -78,14 +78,20 @@ def rewrite_node(state: AgentState):
 def retrieve_node(state: AgentState):
     """Node 2: Retrieves context using the OPTIMIZED query, not the raw question."""
     logger.info("--- NODE: RETRIEVING CONTEXT ---")
-    optimized_query = state["optimized_query"]  # Use the AI-generated query!
+    optimized_query = state["optimized_query"]
     
     retriever = get_retriever()
     docs = retriever.invoke(optimized_query)
     
-    context = "\n\n".join([doc.page_content for doc in docs])
+    # Format context to include metadata for UI parsing
+    context_list = []
+    for doc in docs:
+        source = doc.metadata.get("source", "Unknown")
+        group = doc.metadata.get("access_group", "general")
+        context_list.append(f"SOURCE: {source} | GROUP: {group}\n{doc.page_content}")
     
-    # Keep the debugging file so we can verify the improvement
+    context = "\n\n---\n\n".join(context_list)
+    
     with open("debug_context.txt", "w", encoding="utf-8") as f:
         f.write(context)
         
@@ -106,10 +112,11 @@ def generate_node(state: AgentState):
     prompt = ChatPromptTemplate.from_messages([
         ("system", "You are a Senior Deal Desk Analyst at a major Canadian Bank. "
                    "Your job is to read unstructured corporate contracts and extract precise financial terms. "
-                   "Answer the user's question based ONLY on the following context. "
-                   "Incorporate the ongoing conversation history for continuity. "
-                   "If the answer is not in the context, explicitly state: 'I cannot find this information in the provided deal documents.' "
-                   "Do not guess. Do not hallucinate. \n\nContext:\n{context}"),
+                   "CRITICAL INSTRUCTIONS: "
+                   "1. Answer the user's question based ONLY on the following context. "
+                   "2. If the information is not explicitly in the text, state that you do not know. "
+                   "3. NEVER reference 'dummy' files, example data, or your own previous training data. "
+                   "4. Maintain a professional, objective, and analytical tone. \n\nContext:\n{context}"),
         ("placeholder", "{chat_history}"),
         ("human", "{question}")
     ])
@@ -137,10 +144,12 @@ def grade_context_node(state: AgentState):
         temperature=0
     )
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a quality control agent for a RAG pipeline. "
+        ("system", "You are a semantically flexible quality control agent for a corporate financial RAG pipeline. "
                    "Your job is to evaluate if the provided context is relevant to the user's question. "
-                   "If the context contains information that helps answer the question, output 'yes'. "
-                   "If the context is irrelevant or lacks the necessary details, output 'no'. "
+                   "CRITICAL RULES: "
+                   "1. SEMANTIC FLEXIBILITY: Output 'yes' if the context contains synonymous terms (e.g., 'Applicable Margin' for 'Interest Rate', 'Termination Date' for 'Maturity'). "
+                   "2. PARTIAL RELEVANCE: For comparative questions (e.g., '2024 vs 2025'), output 'yes' if the context contains data for AT LEAST ONE of the entities or years mentioned. "
+                   "3. FINANCIAL FOCUS: Only output 'no' if the question is entirely non-financial (food, travel, etc) or if the context has absolutely no relation to the query. "
                    "Output ONLY the word 'yes' or 'no'. No explanation."),
         ("human", "Question: {question} \n\nContext: {context}")
     ])

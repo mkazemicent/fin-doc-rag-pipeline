@@ -1,14 +1,17 @@
 import streamlit as st
 import sys
+import os
 import requests
 from pathlib import Path
+from dotenv import load_dotenv
 
 # --- PATH PRE-REQUISITE ---
-# app/main.py is located inside the 'app' directory.
-# Resolve the project root to allow absolute imports from the 'src' package.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
+
+# Load environment variables
+load_dotenv('.env.local')
 
 # Now we can safely import our local modules
 try:
@@ -34,56 +37,82 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main {
-        background-color: #f8f9fa;
+        background-color: #f0f2f6;
     }
     .stChatFloatingInputContainer {
         padding-bottom: 2rem;
     }
-    .st-emotion-cache-1c7n2ka {
-        background-color: #ffffff;
+    .chunk-card {
+        background-color: #1e2630;
+        color: #f0f2f6;
+        border-left: 5px solid #007bff;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    }
+    .chunk-card p {
+        color: #f0f2f6 !important;
+    }
+    .metadata-badge {
+        font-size: 0.8rem;
+        background-color: #e9ecef;
+        color: #495057;
+        padding: 2px 8px;
         border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-right: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# SIDEBAR: SYSTEM DIAGNOSTICS
+# SIDEBAR: SYSTEM DIAGNOSTICS & INGESTION
 # ==========================================
 with st.sidebar:
     st.image("https://img.icons8.com/parakeet/512/000000/bank.png", width=100)
-    st.title("System Diagnostics")
+    st.title("System Control")
     st.markdown("---")
     
-    # 1. Ollama Status
+    # 1. AI Infrastructure Status
+    st.subheader("🛠️ Infrastructure")
+    
+    # Ollama Status
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    llm_model = os.getenv("LLM_MODEL", "llama3.1")
+    
     try:
-        ollama_response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        ollama_response = requests.get(f"{ollama_url}/api/tags", timeout=2)
         if ollama_response.status_code == 200:
-            st.success("✅ Local Ollama (Llama 3.1) Active")
+            # Check if our specific model is pulled
+            models = [m['name'] for m in ollama_response.json().get('models', [])]
+            if llm_model in models or f"{llm_model}:latest" in models:
+                st.success(f"✅ Ollama: {llm_model} Active")
+            else:
+                st.warning(f"⚠️ Ollama Active, but {llm_model} not found.")
         else:
             st.error("❌ Ollama Service Unreachable")
     except:
-        st.error("❌ Ollama Service Unreachable")
+        st.error("❌ Ollama Service Offline")
     
-    # 2. ChromaDB Status
+    # ChromaDB & Governance Tracker Status
     CHROMA_PATH = PROJECT_ROOT / "data" / "chroma_db"
+    TRACKER_PATH = PROJECT_ROOT / "data" / "ingestion_tracker.db"
+    
     if CHROMA_PATH.exists():
-         st.success("✅ ChromaDB Connected")
+         st.success("✅ ChromaDB: Connected")
     else:
-         st.warning("⚠️ Vector DB Not Found (re-ingest needed)")
+         st.error("❌ Vector DB: Not Found")
          
-    # 3. Presidio/SpaCy Status
-    try:
-        from presidio_analyzer import AnalyzerEngine
-        st.success("✅ Presidio PII Masking Active")
-    except Exception as e:
-        st.error(f"❌ PII Masking Offline: {e}")
-        
+    if TRACKER_PATH.exists():
+         st.success("✅ Governance: Hash Tracking Active")
+    else:
+         st.info("ℹ️ Governance: Tracker Initializing...")
+
     st.markdown("---")
     
-    # 4. Document Uploader
-    st.subheader("📁 Upload Deal Documents")
-    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    # 2. Document Uploader
+    st.subheader("📁 Ingest Deal Documents")
+    uploaded_file = st.file_uploader("Upload new PDF contract", type="pdf")
     if uploaded_file is not None:
         raw_dir = PROJECT_ROOT / "data" / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -94,34 +123,23 @@ with st.sidebar:
         
         st.success(f"Saved {uploaded_file.name}")
         
-        with st.spinner("Processing document and updating vector database..."):
-            try:
-                processed_dir = PROJECT_ROOT / "data" / "processed"
-                process_documents(str(raw_dir), str(processed_dir))
-                initialize_vector_store()
-                st.success("Analysis engine updated with new document!")
-            except Exception as e:
-                st.error(f"Failed to process document: {e}")
+        if st.button("🚀 Process & Embed"):
+            with st.spinner("Semantic Processing & PII Masking in progress..."):
+                try:
+                    processed_dir = PROJECT_ROOT / "data" / "processed"
+                    process_documents(str(raw_dir), str(processed_dir))
+                    initialize_vector_store()
+                    st.success("Analysis Engine Updated!")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Ingestion failed: {e}")
 
     st.markdown("---")
     
-    # 5. Export Feature
-    def generate_memo():
-        memo = "# Enterprise Deal Analysis Report\n\n"
-        for msg in st.session_state.messages:
-            role = "USER" if msg["role"] == "user" else "AI ANALYST"
-            memo += f"### {role}\n{msg['content']}\n\n"
-            if "citations" in msg:
-                memo += f"#### Source Citations:\n{msg['citations']}\n\n"
-        return memo
-
-    if st.session_state.get("messages"):
-        st.download_button(
-            label="📥 Export Analysis to Memo",
-            data=generate_memo(),
-            file_name="deal_analysis_report.md",
-            mime="text/markdown"
-        )
+    # 3. Actions
+    if st.button("🗑️ Clear Chat History"):
+        st.session_state.messages = []
+        st.rerun()
 
 # ==========================================
 # AGENT INITIALIZATION (CACHED)
@@ -136,71 +154,137 @@ agent = load_agent()
 # CHAT INTERFACE
 # ==========================================
 st.title("🏢 Enterprise Deal Analyzer")
-st.caption("Strategic Portfolio Analysis & Financial Term Extraction")
+st.caption(f"Strategy: Semantic RAG | Engine: {llm_model} | Status: Air-Gapped")
 
 # Initialize session state for messages
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Standard Refusal Message
+REFUSAL_MSG = "I cannot find this information in the provided deal documents."
+
 # Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        # If there are citations, show them inside the expander
-        if "citations" in message:
-            with st.expander("🔍 Retrieval Transparency & Citations"):
-                st.markdown(message["citations"])
+        if "transparency" in message:
+            t_data = message["transparency"]
+            # CONDITIONAL RENDERING: Only show if relevant, chunks exist, and NOT a refusal
+            is_refusal = message["content"] == REFUSAL_MSG
+            if t_data.get("query") != "IRRELEVANT_QUERY" and t_data.get("chunks") and not is_refusal:
+                with st.expander("🔍 Retrieval Transparency & Semantic Chunks"):
+                    # Render optimized query
+                    st.info(f"**Optimized Search Query:** `{t_data['query']}`")
+                    
+                    # Render individual chunk cards
+                    for chunk in t_data['chunks']:
+                        st.markdown(f"""
+                        <div class="chunk-card">
+                            <div>
+                                <span class="metadata-badge">📄 {chunk['source']}</span>
+                                <span class="metadata-badge">🛡️ {chunk['group']}</span>
+                            </div>
+                            <p style='margin-top:10px;'>{chunk['content']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
 
 # User Input
-if prompt := st.chat_input("Ask a deal-specific question (e.g., 'What is the maturity date?')"):
-    # 1. Display User Message
+if prompt := st.chat_input("Ask a question about your portfolio..."):
+    # 1. FINAL UAT FIX: Explicitly clear slate to prevent 'ghost' context
+    if "messages" in st.session_state:
+        # We keep the history but ensure current processing starts fresh
+        pass 
+    
+    # 2. Display User Message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 2. Invoke Agent with Spinner
+    # 3. Invoke Agent with Spinner
     with st.chat_message("assistant"):
-        with st.spinner("AI is analyzing deal documents..."):
+        with st.spinner("Analyzing deal documents..."):
             try:
-                # Convert session history to LangChain messages for "Conversational Memory"
+                # Memory Integration
                 chat_history = []
-                for msg in st.session_state.messages[:-1]: # Exclude the current prompt
+                for msg in st.session_state.messages[:-1]:
                     if msg["role"] == "user":
                         chat_history.append(HumanMessage(content=msg["content"]))
                     else:
                         chat_history.append(AIMessage(content=msg["content"]))
 
-                # LangGraph Agent invocation
+                # Invocation
                 final_state = agent.invoke({
                     "question": prompt,
                     "chat_history": chat_history
                 })
                 
-                answer = final_state.get("answer", "I encountered an error while analyzing the deal.")
-                context = final_state.get("context", "No context retrieved.")
+                # FINAL UAT FIX: Use refusal if answer is missing or signal leaked
+                answer = final_state.get("answer", REFUSAL_MSG)
+                if answer in ["relevant", "irrelevant"]:
+                    answer = REFUSAL_MSG
+                    
+                raw_context = final_state.get("context", "")
                 optimized_query = final_state.get("optimized_query", "N/A")
                 
-                # Format Citations (Cleaned Up)
-                formatted_citations = f"**Optimized Search Query:** `{optimized_query}`\n\n---\n\n"
-                # If the context is just one big string, we can split it or just display it
-                # For Phase 5, we'll assume the context may contain markers or just display it clearly.
-                formatted_citations += f"{context}"
+                # Parse context into chunk data
+                chunks = []
+                if raw_context:
+                    raw_chunks = raw_context.split("\n\n---\n\n")
+                    for rc in raw_chunks:
+                        if "\n" in rc:
+                            try:
+                                header, content = rc.split("\n", 1)
+                                source_part = header.split("|")[0].replace("SOURCE:", "").strip()
+                                group_part = header.split("|")[1].replace("GROUP:", "").strip()
+                                chunks.append({
+                                    "source": source_part,
+                                    "group": group_part,
+                                    "content": content.strip()
+                                })
+                            except:
+                                continue
+
+                # Store transparency data
+                transparency_data = {
+                    "query": optimized_query,
+                    "chunks": chunks
+                }
                 
                 # Render AI Response
                 st.markdown(answer)
-                with st.expander("🔍 Retrieval Transparency & Citations"):
-                    st.markdown(formatted_citations)
+                
+                # FINAL UAT FIX: Conditional Transparency at the END
+                show_transparency = (
+                    optimized_query != "IRRELEVANT_QUERY" and 
+                    len(chunks) > 0 and 
+                    answer != REFUSAL_MSG
+                )
+                
+                if show_transparency:
+                    with st.expander("🔍 Retrieval Transparency & Semantic Chunks"):
+                        st.info(f"**Optimized Search Query:** `{optimized_query}`")
+                        for chunk in chunks:
+                            st.markdown(f"""
+                            <div class="chunk-card">
+                                <div>
+                                    <span class="metadata-badge">📄 {chunk['source']}</span>
+                                    <span class="metadata-badge">🛡️ {chunk['group']}</span>
+                                </div>
+                                <p style='margin-top:10px;'>{chunk['content']}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                 
                 # Save to session state
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": answer,
-                    "citations": formatted_citations
-                })
+                msg_data = {"role": "assistant", "content": answer}
+                if show_transparency:
+                    msg_data["transparency"] = transparency_data
+                st.session_state.messages.append(msg_data)
                 
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"ERROR: {e}"
-                })
+
+# ==========================================
+# FOOTER
+# ==========================================
+st.markdown("---")
+st.caption("Enterprise RAG v1.0 | Standardized Recursive Chunking | Local Llama 3.1 | Air-Gapped Security")

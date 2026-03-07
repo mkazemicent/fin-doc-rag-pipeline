@@ -24,7 +24,7 @@ This document outlines the planned upgrades for the Enterprise Deal Analyzer pip
 - [x] **Dynamic LangGraph Routing:** Add a "Grade Context" self-correction loop to retry searches if the initial retrieval fails.
 
 ## Phase 5: Enterprise UI & Deployment (Upcoming)
-- [ ] Build a frontend Streamlit dashboard featuring system diagnostics and status indicators.
-- [ ] Implement "Rock-Solid Citations" with expandable context panels showing exact source documents.
+- [x] **Enterprise UI:** Build a frontend Streamlit dashboard featuring system diagnostics and status indicators.
+- [x] **Rock-Solid Citations:** Implement expandable context panels showing exact source documents.
 - [ ] Add an "Export to Memo" feature for analysts to download generated insights.
 - [ ] Containerize the application using Docker for secure, isolated deployment.

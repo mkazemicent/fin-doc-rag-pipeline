@@ -1,12 +1,7 @@
 import pytest
-import sys
 from pathlib import Path
 
-# Setup paths so pytest can find our src directory
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT / "src"))
-
-from ingestion.hash_tracker import IngestionTracker
+from src.ingestion.hash_tracker import IngestionTracker
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +97,23 @@ def test_modified_file_is_detected(tracker, sample_file):
 
     assert tracker.is_already_processed(str(sample_file)) is False
 
+# ===========================================================================
+# Test 7 — Deletion Logic
+# ===========================================================================
+
+def test_remove_from_tracker(tracker, sample_file):
+    """Verify that removing a file from the tracker works."""
+    tracker.mark_as_processed(str(sample_file))
+    assert tracker.is_already_processed(str(sample_file)) is True
+    
+    filename = sample_file.name
+    success = tracker.remove_from_tracker(filename)
+    
+    assert success is True
+    assert tracker.is_already_processed(str(sample_file)) is False
 
 # ===========================================================================
-# Test 7 — Persistence Across Sessions
+# Test 8 — Persistence Across Sessions
 # ===========================================================================
 
 def test_close_and_reopen_persists(tmp_path, sample_file):

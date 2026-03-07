@@ -1,12 +1,5 @@
 import pytest
-import sys
-from pathlib import Path
-
-# 1. Setup paths so pytest can find our src directory
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT / "src"))
-
-from ingestion.document_processor import PIIMasker
+from src.ingestion.document_processor import PIIMasker
 
 # 2. Pytest Fixture
 # We use a fixture with scope="module" so the heavy SpaCy NLP model 

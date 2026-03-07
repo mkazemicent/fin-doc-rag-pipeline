@@ -1,15 +1,10 @@
 import pytest
-import sys
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# Setup paths so pytest can find our src directory
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT / "src"))
-
-from ingestion.hash_tracker import IngestionTracker
-from rag.vector_store import delete_document_from_db
+from src.ingestion.hash_tracker import IngestionTracker
+from src.rag.vector_store import delete_document_from_db
 from langchain_core.documents import Document
 
 # ---------------------------------------------------------------------------
@@ -71,7 +66,7 @@ def test_metadata_normalization():
     """ Verify that path-based .txt source is normalized to bare .pdf filename. """
     mock_doc = Document(
         page_content="Text", 
-        metadata={"source": "E:\\data\\processed\\amerigo_2015.txt"}
+        metadata={"source": "data/processed/amerigo_2015.txt"}
     )
     
     # Logic extracted from vector_store.py
@@ -85,7 +80,7 @@ def test_metadata_normalization():
 # Category 3 — ChromaDB Deletion (Mocked)
 # ===========================================================================
 
-@patch("rag.vector_store.get_chroma_instance")
+@patch("src.rag.vector_store.get_chroma_instance")
 def test_delete_document_from_db_mocked(mock_get_instance):
     """
     Test the deletion logic flow without a live ChromaDB.
@@ -105,7 +100,7 @@ def test_delete_document_from_db_mocked(mock_get_instance):
     mock_vs.get.assert_called_once_with(where={"source": "amerigo_2015.pdf"})
     mock_vs.delete.assert_called_once_with(ids=["chunk1", "chunk2", "chunk3", "chunk4", "chunk5"])
 
-@patch("rag.vector_store.get_chroma_instance")
+@patch("src.rag.vector_store.get_chroma_instance")
 def test_delete_nonexistent_document_mocked(mock_get_instance):
     """Verify that deleting a non-existent document returns 0 and logs a warning."""
     mock_vs = MagicMock()

@@ -19,6 +19,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- Module Level Path Constants ---
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
+CHROMA_DB_DIR = PROJECT_ROOT / "data" / "chroma_db"
+HASH_DB_PATH = PROJECT_ROOT / "data" / "ingestion_tracker.db"
+
 def get_chroma_instance(persist_directory: str):
     """
     Initializes a ChromaDB instance with the local embedding model from environment.
@@ -38,12 +44,6 @@ def initialize_vector_store():
     logger.info("IMPORTANT: Ensure your local Ollama application is running!")
     logger.info("=====================================================")
 
-    # 1. Setup Paths
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-    PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
-    CHROMA_DB_DIR = PROJECT_ROOT / "data" / "chroma_db"
-    HASH_DB_PATH = PROJECT_ROOT / "data" / "ingestion_tracker.db"
-    
     if not PROCESSED_DATA_DIR.exists():
         logger.error(f"Processed data directory not found at {PROCESSED_DATA_DIR}")
         return
@@ -172,11 +172,10 @@ def delete_document_from_db(filename: str, chroma_dir: str = None):
     Purges all chunks associated with a specific document from ChromaDB 
     and removes its hash from the IngestionTracker.
     """
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     if not chroma_dir:
-        chroma_dir = str(PROJECT_ROOT / "data" / "chroma_db")
+        chroma_dir = str(CHROMA_DB_DIR)
     
-    hash_db_path = str(PROJECT_ROOT / "data" / "ingestion_tracker.db")
+    hash_db_path = str(HASH_DB_PATH)
 
     logger.info(f"Deleting all chunks for '{filename}' from ChromaDB at {chroma_dir}")
     

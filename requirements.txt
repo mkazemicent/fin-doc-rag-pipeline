@@ -15,3 +15,4 @@ spacy
 langchain-ollama
 pytest
 pytest-cov
+datasets

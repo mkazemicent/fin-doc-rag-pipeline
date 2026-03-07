@@ -4,8 +4,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaEmbeddings
+from langchain_experimental.text_splitter import SemanticChunker
 from langchain_chroma import Chroma
 
 # Load environment variables
@@ -30,8 +30,8 @@ def get_chroma_instance(persist_directory: str):
 
 def initialize_vector_store():
     """
-    Reads processed .txt files, chunks them, generates fully local Ollama embeddings,
-    and stores them in a local ChromaDB instance with robust batch processing.
+    Reads processed .txt files, chunks them using Semantic Chunking, 
+    and stores them in a local ChromaDB instance.
     """
     logger.info("=====================================================")
     logger.info("IMPORTANT: Ensure your local Ollama application is running!")
@@ -95,26 +95,25 @@ def initialize_vector_store():
         logger.info("=====================================================")
         return
 
-    logger.info(f"Identified {len(documents)} NEW document(s) to embed.")
+    logger.info(f"Identified {len(documents)} NEW document(s) for semantic processing.")
 
-    # 4. Chunking Strategy
-    logger.info("Initializing RecursiveCharacterTextSplitter (Size: 500, Overlap: 50)")
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", " ", ""]
-    )
-    
-    chunked_documents = text_splitter.split_documents(documents)
-    logger.info(f"Total chunks created for new files: {len(chunked_documents)}")
-
-    # 5. Initialize Local Ollama Embeddings
+    # 4. Initialize Local Ollama Embeddings (Required for Semantic Chunking)
     embedding_model = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
     logger.info(f"Initializing OllamaEmbeddings (Model: {embedding_model})")
     embeddings = OllamaEmbeddings(
         model=embedding_model,
         base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     )
+
+    # 5. Semantic Chunking Strategy
+    logger.info("Initializing SemanticChunker (Breakpoint: Percentile)")
+    text_splitter = SemanticChunker(
+        embeddings, 
+        breakpoint_threshold_type="percentile"
+    )
+    
+    chunked_documents = text_splitter.split_documents(documents)
+    logger.info(f"Total semantic chunks created: {len(chunked_documents)}")
 
     # 6. Robust Batch Processing
     BATCH_SIZE = 50

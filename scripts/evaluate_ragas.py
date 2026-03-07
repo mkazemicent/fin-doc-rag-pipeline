@@ -4,6 +4,7 @@ import pandas as pd
 import logging
 from pathlib import Path
 from datasets import Dataset
+from dotenv import load_dotenv
 
 # --- PATH PRE-REQUISITE ---
 # scripts/evaluate_ragas.py is located inside the 'scripts' directory.
@@ -11,6 +12,9 @@ from datasets import Dataset
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
+
+# Load environment variables
+load_dotenv('.env.local')
 
 # Local Imports
 try:
@@ -37,11 +41,18 @@ logger = logging.getLogger(__name__)
 logger.info("Configuring local Ollama models for RAGAS evaluation...")
 
 # Critic/Judge LLM
-llm = ChatOllama(model="llama3.1", temperature=0)
+llm = ChatOllama(
+    model=os.getenv("LLM_MODEL", "llama3.1"),
+    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    temperature=0
+)
 critic_llm = LangchainLLMWrapper(llm)
 
 # Evaluator Embeddings
-embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+embeddings = OllamaEmbeddings(
+    model=os.getenv("EMBEDDING_MODEL", "mxbai-embed-large"),
+    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+)
 critic_embeddings = LangchainEmbeddingsWrapper(embeddings)
 
 # ==========================================

@@ -1,12 +1,17 @@
+import os
 import logging
 from typing import TypedDict
 from pathlib import Path
+from dotenv import load_dotenv
 
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langgraph.graph import StateGraph, START, END
+
+# Load environment variables
+load_dotenv('.env.local')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -25,7 +30,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CHROMA_DB_DIR = PROJECT_ROOT / "data" / "chroma_db"
 
 def get_retriever():
-    embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    embeddings = OllamaEmbeddings(
+        model=os.getenv("EMBEDDING_MODEL", "mxbai-embed-large"),
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    )
     vectorstore = Chroma(persist_directory=str(CHROMA_DB_DIR), embedding_function=embeddings)
     return vectorstore.as_retriever(search_kwargs={"k": 20})
 
@@ -34,7 +42,11 @@ def rewrite_node(state: AgentState):
     """Node 1: Rewrites the user's prompt to be highly optimized for Vector Search."""
     logger.info("--- NODE: OPTIMIZING SEARCH QUERY ---")
     question = state["question"]
-    llm = ChatOllama(model="llama3.1", temperature=0)
+    llm = ChatOllama(
+        model=os.getenv("LLM_MODEL", "llama3.1"),
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        temperature=0
+    )
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are a strictly constrained data extraction script. Your ONLY job is to extract financial keywords from a user query to use in a vector database search.
         
@@ -85,7 +97,11 @@ def generate_node(state: AgentState):
     question = state["question"]
     context = state["context"]
     
-    llm = ChatOllama(model="llama3.1", temperature=0) 
+    llm = ChatOllama(
+        model=os.getenv("LLM_MODEL", "llama3.1"),
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        temperature=0
+    ) 
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", "You are a Senior Deal Desk Analyst at a major Canadian Bank. "
@@ -115,7 +131,11 @@ def grade_context_node(state: AgentState):
     context = state["context"]
     retry_count = state.get("retry_count", 0)
 
-    llm = ChatOllama(model="llama3.1", temperature=0)
+    llm = ChatOllama(
+        model=os.getenv("LLM_MODEL", "llama3.1"),
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        temperature=0
+    )
     prompt = ChatPromptTemplate.from_messages([
         ("system", "You are a quality control agent for a RAG pipeline. "
                    "Your job is to evaluate if the provided context is relevant to the user's question. "

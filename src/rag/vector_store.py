@@ -1,11 +1,15 @@
 import os
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
 
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_chroma import Chroma
+
+# Load environment variables
+load_dotenv('.env.local')
 
 # Configure standard Python logging 
 logging.basicConfig(
@@ -16,9 +20,12 @@ logger = logging.getLogger(__name__)
 
 def get_chroma_instance(persist_directory: str):
     """
-    Initializes a ChromaDB instance with the local mxbai-embed-large embedding model.
+    Initializes a ChromaDB instance with the local embedding model from environment.
     """
-    embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    embeddings = OllamaEmbeddings(
+        model=os.getenv("EMBEDDING_MODEL", "mxbai-embed-large"),
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    )
     return Chroma(persist_directory=persist_directory, embedding_function=embeddings)
 
 def initialize_vector_store():
@@ -102,8 +109,12 @@ def initialize_vector_store():
     logger.info(f"Total chunks created for new files: {len(chunked_documents)}")
 
     # 5. Initialize Local Ollama Embeddings
-    logger.info("Initializing OllamaEmbeddings (Model: mxbai-embed-large)")
-    embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    embedding_model = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
+    logger.info(f"Initializing OllamaEmbeddings (Model: {embedding_model})")
+    embeddings = OllamaEmbeddings(
+        model=embedding_model,
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    )
 
     # 6. Robust Batch Processing
     BATCH_SIZE = 50

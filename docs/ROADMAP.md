@@ -1,30 +1,28 @@
-# Project Roadmap & Future Enhancements
+# Project Roadmap: v1.0 & Future Enhancements
 
-This document outlines the planned upgrades for the Enterprise Deal Analyzer pipeline to evolve it from a local PoC to a compliance-ready, enterprise-grade AI architecture.
+This document outlines the architectural journey of the Enterprise Deal Analyzer and the planned upgrades for future iterations.
 
-## Phase 1: Core Pipeline (Completed)
-- [x] Zero-trust document ingestion with Microsoft Presidio PII masking.
-- [x] 100% Air-gapped Vector Storage using local ChromaDB and `mxbai-embed-large`.
-- [x] LangGraph State Machine implementation for agentic reasoning.
-- [x] Autonomous Query Rewriting node to fix keyword imbalance and improve vector search.
+## v1.0 Release (Completed)
+- [x] **Zero-Trust Ingestion:** Microsoft Presidio PII masking integrated into the ingestion pipeline.
+- [x] **Air-Gapped Vector DB:** Local ChromaDB deployment using `mxbai-embed-large`.
+- [x] **Agentic Reasoning:** LangGraph-based state machine with autonomous query rewriting.
+- [x] **Data Governance:** SQLite-based SHA-256 hash tracking for incremental ingestion and deduplication.
+- [x] **Validation Framework:** 71% statement coverage with standardized `pytest` and `pyproject.toml`.
+- [x] **Enterprise UI:** Streamlit dashboard with system diagnostics and retrieval transparency cards.
+- [x] **Semantic-Aware Recursive Strategy:** Optimized chunking (800/150) for maximum reliability and local LLM compatibility.
 
-## Phase 2: Automated Testing & Validation (In Progress)
-- [x] **Unit Testing (Privacy):** Implement `pytest` to mathematically prove Presidio PII masking works against synthetic data.
-- [x] **Unit Testing (Plumbing):** Build integration tests for `vector_store.py` to verify chunk size limits.
-- [ ] **RAGAS Evaluation Integration:** Automate the scoring of Context Precision and Faithfulness to mathematically prove pipeline accuracy (ADR 0003).
+## Next Generation: v2.0 (Planned)
+### 1. Superior Retrieval Precision
+- [ ] **Cross-Encoder Re-ranking:** Implement a local re-ranker (e.g., BGE-Reranker) to refine the Top-K results after initial semantic retrieval.
+- [ ] **Hybrid Search:** Integrate BM25 keyword search alongside vector search to guarantee exact document ID and entity retrieval.
 
-## Phase 3: Enterprise Data Governance (Upcoming)
-- [x] **Incremental Ingestion:** Implement file hashing (SQLite/JSON) to allow dynamic, on-the-fly document uploads without reprocessing the entire dataset.
-- [x] **Document Lifecycle & Deletion (TTL):** Tag all ChromaDB chunks with unique document IDs to allow targeted deletion of specific contracts.
-- [ ] **Role-Based Access Control (RBAC):** Draft the security model for isolating deal access between different analyst teams.
+### 2. Scalable Data Management
+- [ ] **Metadata Pre-filtering:** Implement hard filters at the retrieval stage based on `access_group` or date ranges to optimize performance.
+- [ ] **Document Summarization Indexing:** Create a secondary index of document summaries to allow for high-level portfolio oversight and cross-deal trend analysis.
 
-## Phase 4: Advanced Retrieval & Dynamic Routing (Upcoming)
-- [ ] **Agentic / Semantic Chunking:** Replace `RecursiveCharacterTextSplitter` with an NLP model to dynamically split chunks based on topic/meaning.
-- [ ] **Hybrid Search:** Implement BM25 (keyword search) alongside Vector (semantic) search to guarantee exact document ID retrieval.
-- [x] **Dynamic LangGraph Routing:** Add a "Grade Context" self-correction loop to retry searches if the initial retrieval fails.
+### 3. Deployment & DevOps
+- [ ] **Containerization:** Finalize Docker configuration for secure, isolated, and reproducible deployments across bank infrastructure.
+- [ ] **Observability:** Integrate local logging and tracing (e.g., LangSmith local or OpenTelemetry) to monitor agent performance in production.
 
-## Phase 5: Enterprise UI & Deployment (Upcoming)
-- [x] **Enterprise UI:** Build a frontend Streamlit dashboard featuring system diagnostics and status indicators.
-- [x] **Rock-Solid Citations:** Implement expandable context panels showing exact source documents.
-- [ ] Add an "Export to Memo" feature for analysts to download generated insights.
-- [ ] Containerize the application using Docker for secure, isolated deployment.
+---
+*Enterprise RAG v1.0 Release Date: March 2026*

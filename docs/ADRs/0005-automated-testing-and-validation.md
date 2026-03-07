@@ -1,27 +1,25 @@
-# ADR 0005: Comprehensive Automated Testing and Validation Strategy
+# ADR 0005: Standardized Automated Testing and Validation Architecture
 
 **Status:** Accepted
 **Date:** March 2026
 
 ## Context
-While ADR 0003 established RAGAS for evaluating the probabilistic output of our LLM (Faithfulness and Context Precision), the Enterprise Financial Deal Analyzer currently lacks a deterministic testing framework. To ensure data privacy compliance (verifying Microsoft Presidio actually masks PII), structural integrity (preventing chunk size overflows), and resilient agent routing, we must implement a rigorous testing ecosystem that covers all components of the pipeline prior to deployment.
+Initial attempts at testing relied on fragile `sys.path` hacks within individual test files. This led to collection errors when running `pytest` from the project root and inconsistent import behavior between modules. Furthermore, we needed a strategy to validate complex agent routing and metadata preservation without dependency on a live GPU or local LLM.
 
 ## Decision
-We are adopting a multi-layered testing architecture spanning the entire application lifecycle:
+We have standardized the testing architecture by implementing a modern Python package structure:
 
-1. **Unit Testing Framework (`pytest`):** We will use `pytest` as our core framework to validate all deterministic functions across every module.
-    * **Ingestion Layer:** Asserting that the `PIIMasker` accurately identifies and redacts synthetic PII from raw text strings.
-    * **Vector Layer:** Validating that the `RecursiveCharacterTextSplitter` strictly adheres to the 500-character limit and 50-character overlap configuration.
-    * **Agent Layer:** Testing LangGraph state transitions, ensuring fallback mechanisms (e.g., returning the original prompt if the query optimizer fails) execute correctly.
-2. **Integration Testing:** We will implement automated tests to verify the handoffs between systems, such as ensuring documents embedded in the local ChromaDB can be successfully retrieved by a mock query.
-3. **Continuous Integration (CI) Guardrails:** In future phases, these test suites will run automatically on every code commit. If the privacy unit tests fail, the build will break, preventing unmasked data processing logic from reaching production.
+1. **`pyproject.toml` Configuration:** Established as the central configuration for `pytest`. It explicitly sets `pythonpath = ["."]` and defines the test directory, eliminating the need for `sys.path` injection in code.
+2. **Package Designation:** Added `src/__init__.py` to officially designate the `src` directory as a Python package, ensuring consistent absolute imports (e.g., `from src.rag...`) across tests and production code.
+3. **Mock-First Methodology:** Mandated the use of `unittest.mock` and `patch` for all LLM and Embedding calls. This ensures the test suite is deterministic, fast, and can run on CI/CD environments without specialized hardware.
+4. **Coverage Guardrails:** Established a requirement for statement coverage (currently at 71%) to ensure critical path logic (routing, hash checking, metadata injection) is validated.
 
 ## Consequences
 
-**Positive:**
-* **Compliance Assurance:** Mathematically proves to risk and compliance teams that the PII masking layer functions as designed before touching real financial data.
-* **Regression Prevention:** Ensures future updates to the pipeline (like switching embedding models or altering chunk sizes) do not silently break existing functionality.
-* **System Stability:** Validates error handling and batch processing limits, ensuring the local hardware (RTX 3070 Ti) is not overwhelmed.
+### Positive
+* **Developer Productivity:** Standardized commands (`python -m pytest`) work immediately for all contributors.
+* **Operational Reliability:** Guaranteed validation of governance features (hash tracking, PII masking) on every build.
+* **Portability:** The testing framework is no longer tied to local file system quirks.
 
-**Negative / Trade-offs:**
-* **Development Overhead:** Writing and maintaining comprehensive unit tests and mock objects requires significant upfront engineering time, slowing immediate feature development.
+### Negative
+* **Brevity:** Requires more structured test code and mock configurations compared to simple script-based testing.

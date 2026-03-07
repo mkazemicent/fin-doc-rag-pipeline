@@ -7,6 +7,7 @@ from langchain_community.document_loaders import TextLoader
 from langchain_ollama import OllamaEmbeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_chroma import Chroma
+from src.ingestion.hash_tracker import IngestionTracker
 
 # Load environment variables
 load_dotenv('.env.local')
@@ -41,61 +42,55 @@ def initialize_vector_store():
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
     CHROMA_DB_DIR = PROJECT_ROOT / "data" / "chroma_db"
+    HASH_DB_PATH = PROJECT_ROOT / "data" / "ingestion_tracker.db"
     
     if not PROCESSED_DATA_DIR.exists():
         logger.error(f"Processed data directory not found at {PROCESSED_DATA_DIR}")
         return
 
-    # 2. Initialize/Access ChromaDB Early (to check existing records)
+    # 2. Initialize Tracker and ChromaDB
+    tracker = IngestionTracker(str(HASH_DB_PATH))
     logger.info(f"Accessing ChromaDB at {CHROMA_DB_DIR}")
     vectorstore = get_chroma_instance(str(CHROMA_DB_DIR))
     
-    # 2.1 Fetch Existing Sources
-    try:
-        # We only need the source metadata to determine what's already embedded
-        existing_data = vectorstore.get(include=["metadatas"])
-        existing_sources = {
-            meta.get("source") 
-            for meta in existing_data.get("metadatas", []) 
-            if meta and "source" in meta
-        }
-        logger.info(f"Found {len(existing_sources)} document(s) already in vector store.")
-    except Exception as e:
-        logger.warning(f"Could not fetch existing metadata (DB might be empty): {e}")
-        existing_sources = set()
-
-    # 3. Load & Filter Documents
+    # 3. Load & Filter Documents based on SHA-256 Hashes
     logger.info(f"Loading and filtering .txt files from {PROCESSED_DATA_DIR}")
     txt_files = list(PROCESSED_DATA_DIR.glob("*.txt"))
     
     if not txt_files:
         logger.warning("No .txt files found to process.")
+        tracker.close()
         return
 
     documents = []
+    processed_file_paths = [] # To mark as processed later
+
     for txt_file in txt_files:
         normalized_name = txt_file.stem + ".pdf"
         
-        # --- INCREMENTAL CHECK ---
-        if normalized_name in existing_sources:
-            continue  # Skip files already in DB
+        # --- ROBUST INCREMENTAL CHECK (SHA-256) ---
+        if tracker.is_already_processed(str(txt_file)):
+            continue  # Skip files with identical content
             
         loader = TextLoader(str(txt_file), encoding="utf-8")
         loaded_docs = loader.load()
         
-        # Metadata Normalization
+        # Metadata Normalization & RBAC Injection
         for doc in loaded_docs:
             doc.metadata["source"] = normalized_name
+            doc.metadata["access_group"] = "general" # Phase 5: RBAC groundwork
             
         documents.extend(loaded_docs)
+        processed_file_paths.append(txt_file)
         
     if not documents:
         logger.info("=====================================================")
-        logger.info("INCREMENTAL SYNC: No new documents to embed. Exiting.")
+        logger.info("INCREMENTAL SYNC: No new or modified documents. Exiting.")
         logger.info("=====================================================")
+        tracker.close()
         return
 
-    logger.info(f"Identified {len(documents)} NEW document(s) for semantic processing.")
+    logger.info(f"Identified {len(documents)} NEW or MODIFIED document(s) for semantic processing.")
 
     # 4. Initialize Local Ollama Embeddings (Required for Semantic Chunking)
     embedding_model = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
@@ -105,14 +100,22 @@ def initialize_vector_store():
         base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     )
 
-    # 5. Semantic Chunking Strategy
+    # 5. Semantic Chunking Strategy (Robust Metadata Preservation)
     logger.info("Initializing SemanticChunker (Breakpoint: Percentile)")
     text_splitter = SemanticChunker(
         embeddings, 
         breakpoint_threshold_type="percentile"
     )
     
-    chunked_documents = text_splitter.split_documents(documents)
+    # We split documents individually to guarantee metadata carries over correctly
+    chunked_documents = []
+    for doc in documents:
+        doc_chunks = text_splitter.split_documents([doc])
+        for chunk in doc_chunks:
+            # Explicitly sync metadata from parent to chunk
+            chunk.metadata.update(doc.metadata)
+        chunked_documents.extend(doc_chunks)
+
     logger.info(f"Total semantic chunks created: {len(chunked_documents)}")
 
     # 6. Robust Batch Processing
@@ -134,17 +137,31 @@ def initialize_vector_store():
             logger.warning(f"Failed to embed batch {current_batch_num}/{total_batches}. Error: {e}")
             continue
             
+    # 7. Update Tracker for successful files
+    if successful_chunks > 0:
+        for file_path in processed_file_paths:
+            tracker.mark_as_processed(str(file_path))
+
+    tracker.close()
     logger.info(f"Finished embedding. Stored {successful_chunks}/{len(chunked_documents)} chunks.")
 
-    # 7. Quick Sanity Check
+    # 8. Quick Sanity Check
     test_query = "maturity date"
     logger.info(f"Running sanity check query: '{test_query}'")
     try:
+        vectorstore = get_chroma_instance(str(CHROMA_DB_DIR))
         results = vectorstore.similarity_search(test_query, k=1)
         if results:
-            preview = results[0].page_content[:150].replace('\n', ' ')
-            source = results[0].metadata.get("source", "Unknown")
-            logger.info(f"Sanity check passed. Top result from '{source}': {preview}...")
+            res_doc = results[0]
+            preview = res_doc.page_content[:150].replace('\n', ' ')
+            source = res_doc.metadata.get("source", "Unknown")
+            group = res_doc.metadata.get("access_group", "Unknown")
+            
+            # Detailed logging if metadata is missing
+            if group == "Unknown":
+                logger.warning(f"Metadata Warning: 'access_group' missing. Raw Metadata: {res_doc.metadata}")
+            
+            logger.info(f"Sanity check passed. Result from '{source}' (Group: {group}): {preview}...")
         else:
             logger.warning("Sanity check query returned no results.")
     except Exception as e:
@@ -152,29 +169,31 @@ def initialize_vector_store():
 
 def delete_document_from_db(filename: str, chroma_dir: str = None):
     """
-    Purges all chunks associated with a specific document (source filename) from ChromaDB.
-
-    Args:
-        filename: Bare original PDF filename (e.g., 'amerigo_2015.pdf').
-        chroma_dir: Optional path override for Chroma persistence.
+    Purges all chunks associated with a specific document from ChromaDB 
+    and removes its hash from the IngestionTracker.
     """
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     if not chroma_dir:
-        PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
         chroma_dir = str(PROJECT_ROOT / "data" / "chroma_db")
+    
+    hash_db_path = str(PROJECT_ROOT / "data" / "ingestion_tracker.db")
 
     logger.info(f"Deleting all chunks for '{filename}' from ChromaDB at {chroma_dir}")
     
     vectorstore = get_chroma_instance(chroma_dir)
+    tracker = IngestionTracker(hash_db_path)
     
-    # LangChain's Chroma.delete(where=...) has inconsistent support. 
-    # Reliable pattern: get IDs -> delete by ID.
     try:
+        # 1. Delete from ChromaDB
         matches = vectorstore.get(where={"source": filename})
         matching_ids = matches.get("ids", [])
         
         if matching_ids:
             vectorstore.delete(ids=matching_ids)
-            logger.info(f"Successfully deleted {len(matching_ids)} chunks for '{filename}'.")
+            logger.info(f"Successfully deleted {len(matching_ids)} chunks from ChromaDB.")
+            
+            # 2. Delete from Tracker
+            tracker.remove_from_tracker(filename)
             return len(matching_ids)
         else:
             logger.warning(f"No chunks found in database for document: '{filename}'")
@@ -183,6 +202,8 @@ def delete_document_from_db(filename: str, chroma_dir: str = None):
     except Exception as e:
         logger.error(f"Failed to delete document '{filename}': {e}")
         return 0
+    finally:
+        tracker.close()
 
 if __name__ == "__main__":
     try:

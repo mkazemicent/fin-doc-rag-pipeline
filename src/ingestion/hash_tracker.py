@@ -2,6 +2,7 @@ import sqlite3
 import hashlib
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,6 @@ class IngestionTracker:
         """
         current_hash = self.compute_hash(file_path)
         # Extract just the filename for the DB lookup
-        from pathlib import Path
         filename = Path(file_path).name
 
         row = self.conn.execute(
@@ -107,7 +107,6 @@ class IngestionTracker:
         Args:
             file_path: Path to the file that was successfully processed.
         """
-        from pathlib import Path
         filename = Path(file_path).name
         file_hash = self.compute_hash(file_path)
         timestamp = datetime.now(timezone.utc).isoformat()

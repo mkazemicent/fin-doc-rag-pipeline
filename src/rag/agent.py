@@ -36,13 +36,15 @@ def rewrite_node(state: AgentState):
     
     llm = ChatOllama(model="llama3.1", temperature=0)
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert search query optimizer for a Vector Database. "
-                   "Convert the user's question into a highly focused, keyword-dense search query. "
-                   "Extract only the core financial terms and the specific company. "
-                   "IMPORTANT: Output ONLY the optimized keywords. Do not include any conversational text."),
+        ("system", """You are a strictly constrained data extraction script. Your ONLY job is to extract financial keywords from a user query to use in a vector database search.
+        
+        RULES:
+        1. NEVER write conversational text (e.g., "Here is the query", "I am an expert").
+        2. If the user asks a non-financial question (like recipes or weather), output exactly the word: IRRELEVANT_QUERY
+        3. Output ONLY the raw keywords separated by spaces.
+        """),
         ("human", "Optimize this question: {question}")
     ])
-    
     chain = prompt | llm | StrOutputParser()
     optimized = chain.invoke({"question": question}).strip()
     

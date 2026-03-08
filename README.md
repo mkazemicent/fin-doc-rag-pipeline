@@ -36,11 +36,6 @@ graph TD
 * **Agentic Self-Correction:** Implements a **LangGraph State Machine** that autonomously grades retrieval quality and rewrites queries until a relevant context is found.
 * **RBAC Groundwork:** Every document chunk is injected with `access_group` metadata at the ingestion stage for future enterprise scaling.
 
-## 📊 Quality & Validation
-* **Test Coverage:** **71% Statement Coverage** achieved via a standardized `pytest` suite.
-* **Reliability:** Heavy use of unit test mocks ensures deterministic validation of routing, PII masking, and metadata preservation without requiring a live GPU.
-* **RAGAS Evaluation:** Mathematical scoring of Faithfulness and Relevancy using the RAGAS framework.
-
 ## 🛠️ Getting Started
 
 ### 1. Prerequisites
@@ -48,7 +43,7 @@ graph TD
 *   **Local LLM:** [Ollama](https://ollama.com/) must be installed and running.
 *   **Models:** `ollama pull llama3.1` and `ollama pull mxbai-embed-large`.
 
-### 2. Installation
+### 2. Installation & Setup
 ```bash
 git clone https://github.com/mkazemicent/fin-doc-rag-pipeline.git
 cd fin-doc-rag-pipeline
@@ -57,21 +52,40 @@ cd fin-doc-rag-pipeline
 python -m venv venv
 source venv/bin/activate
 
-# Install dependencies and setup environment
+# Install dependencies
 pip install -r requirements.txt
-cp .env.example .env.local  # Update your local config
+python -m spacy download en_core_web_lg
+
+# Initialize local configuration
+cp .env.example .env.local  # Update OLLAMA_BASE_URL if needed
 ```
 
-### 3. Running Tests
-The project uses a standardized `pyproject.toml` configuration.
+### 3. Data Directory Initialization
+The data folders are ignored by Git to ensure sensitive contracts never leave your local environment. You must create them manually:
 ```bash
-python -m pytest --cov=src tests/
+mkdir -p data/raw data/processed data/chroma_db
 ```
 
-## 🚀 Execution Guide
-* **Dashboard:** `streamlit run app/main.py`
-* **Ingestion:** `python -m src.rag.vector_store`
-* **Evaluation:** `python scripts/evaluate_ragas.py`
+## 🚀 Bulk Processing Guide
+For processing large batches of PDF contracts, use the CLI pipeline which leverages incremental sync:
+
+1.  **Stage 1: PII Masking & Extraction**
+    Redacts sensitive info and extracts text into `data/processed/`.
+    ```bash
+    python -m src.ingestion.document_processor
+    ```
+
+2.  **Stage 2: Semantic Chunking & Vector Indexing**
+    Hashes, chunks, and embeds documents into ChromaDB. Skips unchanged files.
+    ```bash
+    python -m src.rag.vector_store
+    ```
+
+## 📂 System Usage
+*   **Standard Workflow:** Place your PDFs in `data/raw/`, run the two bulk processing commands above, and then launch the dashboard.
+*   **Interactive Dashboard:** `streamlit run app/main.py` (Supports single-file uploads).
+*   **Validation:** `python -m pytest --cov=src tests/` (71% Coverage).
+*   **RAGAS Evaluation:** `python scripts/evaluate_ragas.py`.
 
 ---
 *Developed for Canadian Financial Services Compliance. Air-Gapped. Secure. Semantic.*

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "enterprise-deal-analyzer"
+name = "fin-deal-analyzer-poc"
 version = "0.1.0"
 description = "Air-gapped RAG pipeline for financial document analysis"
 readme = "README.md"

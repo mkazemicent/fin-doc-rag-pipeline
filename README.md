@@ -1,91 +1,111 @@
-# Enterprise Deal Analytics & Risk Extraction Pipeline (v1.0)
+# 🏦 Secure Financial Deal Analyzer (Local-First PoC)
 
-A production-ready, agentic RAG pipeline designed to automate the extraction of critical financial terms and assess risks in unstructured corporate contracts. 
+A high-performance, agentic RAG pipeline designed to automate the extraction of critical financial terms and assess risks in unstructured corporate contracts and credit agreements. 
 
-Built with 100% air-gapped security and strict data governance for the financial services sector.
+This is a **Local-First Proof of Concept (PoC)**, architected with a modular, scalable foundation for future enterprise deployment.
 
-## Core Architecture
+## 🏗️ Core Architecture
+This pipeline operates as a multi-container Docker application, ensuring service isolation and local air-gapped security.
+
 ```mermaid
 graph TD
-    subgraph "Governance & Ingestion Layer"
-        A[Raw PDF Contracts] --> B(Presidio PII Masking)
-        B --> C{SQLite Hash Check}
-        C -- "New/Modified" --> D[Semantic-Aware Recursive Split]
-        C -- "Unchanged" --> SKIP[Skip Ingestion]
-        D --> E[Inject Metadata: access_group]
+    subgraph "Infrastructure (Docker Network)"
+        A[Browser] -->|localhost:8501| B(Streamlit App Container)
+        B -->|HTTP:8000| C[(ChromaDB Server Container)]
+        B -->|HTTP:11434| D(Ollama: Quantized Llama 3.1)
     end
 
-    subgraph "Air-Gapped Vector DB"
-        E --> F(Ollama: mxbai-embed-large)
-        F --> G[(Local ChromaDB)]
+    subgraph "Data Persistence (Shared Volume)"
+        E[(Host: ./data)]
+        E <-->|Volume Mount| B
+        E <-->|Volume Mount| C
     end
 
-    subgraph "Agentic Reasoning (LangGraph)"
-        H[Streamlit UI] --> I(Rewrite Node)
-        I --> J(Retrieve Node)
-        J --> K{Grade Context Node}
-        K -- "Relevant" --> L(Generate Node)
-        K -- "Irrelevant < 3" --> I
-        L --> H
+    subgraph "Workflow Lifecycle"
+        B -->|1. Ingest| F[PII Masking & Chunking]
+        F -->|2. Index| C
+        B -->|3. Query| G[LangGraph Deal Analyzer]
     end
 ```
 
-## Key Capabilities
-* **Governance Layer:** Integrated **SQLite Hash Tracking** ensures incremental ingestion, skipping unchanged files to optimize local GPU resources.
-* **Semantic-Aware Recursive Strategy:** Utilizes an optimized splitting logic (800/150) with paragraph and sentence-level awareness to ensure 100% reliability with local LLM context windows.
-* **Agentic Self-Correction:** Implements a **LangGraph State Machine** that autonomously grades retrieval quality and rewrites queries until a relevant context is found.
-* **RBAC Groundwork:** Every document chunk is injected with `access_group` metadata at the ingestion stage for future enterprise scaling.
+## 🧠 Deal Analyzer Logic (LangGraph)
+The agent utilizes a self-correcting state machine to ensure precise financial data extraction from unstructured text.
 
-## 🛠️ Getting Started
+```mermaid
+graph LR
+    START((Start)) --> REWRITE[Rewrite Node]
+    REWRITE --> RETRIEVE[Retrieve Node]
+    RETRIEVE --> GRADE{Grade Context}
+    GRADE -- "Irrelevant < 3" --> REWRITE
+    GRADE -- "Relevant" --> GEN[Generate Node]
+    GEN --> END((Structured Output))
+
+    subgraph "Pydantic Extraction"
+    GEN -.-> P[DealExtraction Schema]
+    P -.-> T[Deal Terms]
+    P -.-> R[Risk Factors]
+    P -.-> M[Maturity Date]
+    end
+```
+
+## 💎 Low-VRAM Optimization
+This project is specifically designed to run on consumer hardware with **8GB - 12GB VRAM** (e.g., NVIDIA RTX 3070 Ti). 
+
+*   **Inference:** Utilizes **4-bit/8-bit Quantized Llama 3.1** via Ollama to maximize speed while minimizing memory usage.
+*   **Embeddings:** Employs **`mxbai-embed-large`**, a state-of-the-art embedding model that provides high-performance retrieval with a very low footprint.
+*   **Memory Management:** Implements efficient batch processing (50 chunks per batch) during ingestion to prevent GPU memory overflows.
+
+## 🚀 Key Capabilities
+*   **Structured Financial Extraction:** Guarantees JSON-structured responses via Pydantic `DealExtraction` (Terms, Risks, Maturity), removing LLM hallucination in quantitative data.
+*   **Self-Correction Loop:** Uses a **LangGraph State Machine** that autonomously grades retrieval relevance and rewrites queries for financial precision.
+*   **Incremental Sync:** Integrated **SQLite Hash Tracking** ensures that only new or modified contracts are processed, saving significant compute time.
+*   **RBAC Groundwork:** Every document chunk is injected with `access_group` metadata during ingestion for future enterprise role-based access control.
+
+## 🚀 Enterprise Scaling Strategy
+While this PoC is optimized for local air-gapped development, the modular architecture is **100% compatible** with horizontal scaling in **Red Hat OpenShift** or **AWS/Azure Kubernetes**. 
+
+By simply swapping environment variables, the system can transition to managed services like **AWS Bedrock/Azure OpenAI** and **Managed pgvector (RDS)** while maintaining strict VPC isolation. See [ADR 0008: Scaling Roadmap](docs/ADRs/0008-local-poc-to-cloud-scaling.md) for details.
+
+## 🛠️ Getting Started (How to Use)
 
 ### 1. Prerequisites
-*   **Python:** 3.10 or higher.
-*   **Local LLM:** [Ollama](https://ollama.com/) must be installed and running.
-*   **Models:** `ollama pull llama3.1` and `ollama pull mxbai-embed-large`.
+*   **Docker & Docker Compose** installed.
+*   **NVIDIA Container Toolkit** (for local GPU acceleration).
+*   **Ollama Models:** Ensure you have pulled `llama3.1` and `mxbai-embed-large` via Ollama.
 
-### 2. Installation & Setup
+### 2. Setup & Launch
 ```bash
-git clone https://github.com/mkazemicent/fin-doc-rag-pipeline.git
-cd fin-doc-rag-pipeline
+git clone https://github.com/mkazemicent/fin-deal-analyzer-poc.git
+cd fin-deal-analyzer-poc
 
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate
+# 1. Initialize configuration
+cp .env.example .env.local
 
-# Install dependencies
-pip install -r requirements.txt
-python -m spacy download en_core_web_lg
+# 2. Critical: Fix data volume permissions for the non-root 'appuser' (UID 1000)
+sudo chown -R 1000:1000 ./data
+sudo chmod -R 775 ./data
 
-# Initialize local configuration
-cp .env.example .env.local  # Update OLLAMA_BASE_URL if needed
+# 3. Launch the complete stack
+docker-compose up -d --build
 ```
+*Access the dashboard at `http://localhost:8501`*
 
-### 3. Data Directory Initialization
-The data folders are ignored by Git to ensure sensitive contracts never leave your local environment. You must create them manually:
-```bash
-mkdir -p data/raw data/processed data/chroma_db
-```
+### 3. Analyzing Your First Deal
+1.  **Upload:** Use the **Streamlit Sidebar** to upload a PDF contract (e.g., a Credit Agreement).
+2.  **Process:** Click **🚀 Process & Embed**. The system will mask PII, chunk the text, and index it into the vector database.
+3.  **Analyze:** Ask a question in the chat (e.g., "What is the maturity date and interest margin?").
+4.  **Review:** See the **Structured Deal Analysis Results** and expand the **Retrieval Transparency** section to see exactly which parts of the contract the AI used.
 
-## 🚀 Bulk Processing Guide
-For processing large batches of PDF contracts, use the CLI pipeline which leverages incremental sync:
+## 📂 Useful Commands
+Use these commands inside the `deal-analyzer-app` container to manage the system via CLI:
 
-1.  **Stage 1: PII Masking & Extraction**
-    Redacts sensitive info and extracts text into `data/processed/`.
-    ```bash
-    python -m src.ingestion.document_processor
-    ```
-
-2.  **Stage 2: Semantic Chunking & Vector Indexing**
-    Hashes, chunks, and embeds documents into ChromaDB. Skips unchanged files.
-    ```bash
-    python -m src.rag.vector_store
-    ```
-
-## 📂 System Usage
-*   **Standard Workflow:** Place your PDFs in `data/raw/`, run the two bulk processing commands above, and then launch the dashboard.
-*   **Interactive Dashboard:** `streamlit run app/main.py` (Supports single-file uploads).
-*   **Validation:** `python -m pytest --cov=src tests/` (71% Coverage).
-*   **RAGAS Evaluation:** `python scripts/evaluate_ragas.py`.
+| Task | Command |
+| :--- | :--- |
+| **Bulk Masking** | `docker exec -it deal-analyzer-app python -m src.ingestion.document_processor` |
+| **Bulk Indexing** | `docker exec -it deal-analyzer-app python -m src.rag.chroma_deal_store` |
+| **Run Unit Tests** | `docker exec -it deal-analyzer-app pytest tests/` |
+| **Check Logs** | `docker logs deal-analyzer-app -f` |
+| **Restart App** | `docker-compose restart app` |
 
 ---
-*Developed for Canadian Financial Services Compliance. Air-Gapped. Secure. Semantic.*
+*Developed for Tier-1 Financial Compliance. Local-First. Air-Gapped. GPU-Optimized.*

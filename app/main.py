@@ -2,6 +2,8 @@ import streamlit as st
 import sys
 import os
 import requests
+import tempfile
+import shutil
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -15,9 +17,9 @@ load_dotenv('.env.local')
 
 # Now we can safely import our local modules
 try:
-    from src.rag.agent import build_agent
+    from src.rag.deal_analyzer import build_deal_analyzer, DealExtraction
     from src.ingestion.document_processor import process_documents
-    from src.rag.vector_store import initialize_vector_store
+    from src.rag.chroma_deal_store import initialize_vector_store
     from langchain_core.messages import HumanMessage, AIMessage
 except ImportError as e:
     st.error(f"Failed to import agent modules. Check sys.path. Error: {e}")
@@ -62,6 +64,23 @@ st.markdown("""
         border-radius: 10px;
         margin-right: 5px;
     }
+    .deal-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
+        margin-bottom: 20px;
+    }
+    .term-item {
+        border-left: 3px solid #28a745;
+        padding-left: 10px;
+        margin-bottom: 5px;
+    }
+    .risk-item {
+        border-left: 3px solid #dc3545;
+        padding-left: 10px;
+        margin-bottom: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -83,7 +102,6 @@ with st.sidebar:
     try:
         ollama_response = requests.get(f"{ollama_url}/api/tags", timeout=2)
         if ollama_response.status_code == 200:
-            # Check if our specific model is pulled
             models = [m['name'] for m in ollama_response.json().get('models', [])]
             if llm_model in models or f"{llm_model}:latest" in models:
                 st.success(f"✅ Ollama: {llm_model} Active")
@@ -94,49 +112,70 @@ with st.sidebar:
     except:
         st.error("❌ Ollama Service Offline")
     
-    # ChromaDB & Governance Tracker Status
-    CHROMA_PATH = PROJECT_ROOT / "data" / "chroma_db"
-    TRACKER_PATH = PROJECT_ROOT / "data" / "ingestion_tracker.db"
+    # ChromaDB (Server Connection Check)
+    chroma_host = os.getenv("CHROMA_HOST", "localhost")
+    chroma_port = os.getenv("CHROMA_PORT", "8000")
+    # Using /api/v2/heartbeat as /api/v1/ is deprecated in latest Chroma
+    chroma_url = f"http://{chroma_host}:{chroma_port}/api/v2/heartbeat"
     
-    if CHROMA_PATH.exists():
-         st.success("✅ ChromaDB: Connected")
-    else:
-         st.error("❌ Vector DB: Not Found")
+    try:
+        chroma_response = requests.get(chroma_url, timeout=2)
+        if chroma_response.status_code == 200:
+            st.success(f"✅ ChromaDB: Connected ({chroma_host})")
+        else:
+            # Fallback check for / if v2 is somehow not yet ready
+            st.warning(f"⚠️ ChromaDB: Response {chroma_response.status_code}")
+    except:
+        st.error("❌ ChromaDB: Offline/Unreachable")
          
+    # Governance Tracker
+    TRACKER_PATH = PROJECT_ROOT / "data" / "ingestion_state.db"
     if TRACKER_PATH.exists():
-         st.success("✅ Governance: Hash Tracking Active")
+         st.success("✅ Governance: Tracking Active")
     else:
-         st.info("ℹ️ Governance: Tracker Initializing...")
+         st.info("ℹ️ Governance: Initializing...")
 
     st.markdown("---")
     
     # 2. Document Uploader
     st.subheader("📁 Ingest Deal Documents")
     uploaded_file = st.file_uploader("Upload new PDF contract", type="pdf")
+    
     if uploaded_file is not None:
         raw_dir = PROJECT_ROOT / "data" / "raw"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        pdf_path = raw_dir / uploaded_file.name
+        tmp_path = None
         
-        with open(pdf_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        
-        st.success(f"Saved {uploaded_file.name}")
-        
-        if st.button("🚀 Process & Embed"):
-            with st.spinner("Semantic Processing & PII Masking in progress..."):
-                try:
-                    processed_dir = PROJECT_ROOT / "data" / "processed"
-                    process_documents(str(raw_dir), str(processed_dir))
-                    initialize_vector_store()
-                    st.success("Analysis Engine Updated!")
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"Ingestion failed: {e}")
+        try:
+            os.makedirs(raw_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(uploaded_file.getbuffer())
+                tmp_path = tmp.name
+            
+            final_pdf_path = raw_dir / uploaded_file.name
+            shutil.move(tmp_path, final_pdf_path)
+            st.success(f"✅ Securely saved: {uploaded_file.name}")
+            
+            if st.button("🚀 Process & Embed"):
+                with st.spinner("Processing & PII Masking..."):
+                    try:
+                        processed_dir = PROJECT_ROOT / "data" / "processed"
+                        os.makedirs(processed_dir, exist_ok=True)
+                        process_documents(str(raw_dir), str(processed_dir))
+                        initialize_vector_store()
+                        st.success("Analysis Engine Updated!")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Ingestion failed: {e}")
+        except PermissionError:
+            st.error("🚨 Permission Denied: UID 1000 cannot write to volume.")
+        except Exception as e:
+            st.error(f"Upload failed: {e}")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     st.markdown("---")
     
-    # 3. Actions
     if st.button("🗑️ Clear Chat History"):
         st.session_state.messages = []
         st.rerun()
@@ -146,9 +185,26 @@ with st.sidebar:
 # ==========================================
 @st.cache_resource
 def load_agent():
-    return build_agent()
+    return build_deal_analyzer()
 
 agent = load_agent()
+
+# ==========================================
+# UTILS
+# ==========================================
+def render_deal_extraction(extraction: DealExtraction):
+    """Renders the DealExtraction Pydantic model."""
+    with st.container():
+        st.markdown(f"### 📅 Maturity Date: **{extraction.maturity_date}**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("#### 📝 Key Deal Terms")
+            for term in extraction.deal_terms:
+                st.markdown(f"<div class='term-item'>{term}</div>", unsafe_allow_html=True)
+        with col2:
+            st.markdown("#### ⚠️ Risk Factors")
+            for risk in extraction.risk_factors:
+                st.markdown(f"<div class='risk-item'>{risk}</div>", unsafe_allow_html=True)
 
 # ==========================================
 # CHAT INTERFACE
@@ -156,27 +212,22 @@ agent = load_agent()
 st.title("🏢 Enterprise Deal Analyzer")
 st.caption(f"Strategy: Semantic RAG | Engine: {llm_model} | Status: Air-Gapped")
 
-# Initialize session state for messages
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Standard Refusal Message
 REFUSAL_MSG = "I cannot find this information in the provided deal documents."
 
-# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        if isinstance(message["content"], DealExtraction):
+            render_deal_extraction(message["content"])
+        else:
+            st.markdown(message["content"])
         if "transparency" in message:
             t_data = message["transparency"]
-            # CONDITIONAL RENDERING: Only show if relevant, chunks exist, and NOT a refusal
-            is_refusal = message["content"] == REFUSAL_MSG
-            if t_data.get("query") != "IRRELEVANT_QUERY" and t_data.get("chunks") and not is_refusal:
-                with st.expander("🔍 Retrieval Transparency & Semantic Chunks"):
-                    # Render optimized query
-                    st.info(f"**Optimized Search Query:** `{t_data['query']}`")
-                    
-                    # Render individual chunk cards
+            if t_data.get("query") != "IRRELEVANT_QUERY" and t_data.get("chunks"):
+                with st.expander("🔍 Retrieval Transparency"):
+                    st.info(f"**Optimized Query:** `{t_data['query']}`")
                     for chunk in t_data['chunks']:
                         st.markdown(f"""
                         <div class="chunk-card">
@@ -188,37 +239,27 @@ for message in st.session_state.messages:
                         </div>
                         """, unsafe_allow_html=True)
 
-# User Input
 if prompt := st.chat_input("Ask a question about your portfolio..."):
-    # 1. FINAL UAT FIX: Explicitly clear slate to prevent 'ghost' context
-    if "messages" in st.session_state:
-        # We keep the history but ensure current processing starts fresh
-        pass 
-    
-    # 2. Display User Message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 3. Invoke Agent with Spinner
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing deal documents..."):
+        with st.spinner("Analyzing..."):
             try:
-                # Memory Integration
                 chat_history = []
                 for msg in st.session_state.messages[:-1]:
+                    content = str(msg["content"])
                     if msg["role"] == "user":
-                        chat_history.append(HumanMessage(content=msg["content"]))
+                        chat_history.append(HumanMessage(content=content))
                     else:
-                        chat_history.append(AIMessage(content=msg["content"]))
+                        chat_history.append(AIMessage(content=content))
 
-                # Invocation
                 final_state = agent.invoke({
                     "question": prompt,
                     "chat_history": chat_history
                 })
                 
-                # FINAL UAT FIX: Use refusal if answer is missing or signal leaked
                 answer = final_state.get("answer", REFUSAL_MSG)
                 if answer in ["relevant", "irrelevant"]:
                     answer = REFUSAL_MSG
@@ -226,7 +267,6 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                 raw_context = final_state.get("context", "")
                 optimized_query = final_state.get("optimized_query", "N/A")
                 
-                # Parse context into chunk data
                 chunks = []
                 if raw_context:
                     raw_chunks = raw_context.split("\n\n---\n\n")
@@ -236,50 +276,26 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                                 header, content = rc.split("\n", 1)
                                 source_part = header.split("|")[0].replace("SOURCE:", "").strip()
                                 group_part = header.split("|")[1].replace("GROUP:", "").strip()
-                                chunks.append({
-                                    "source": source_part,
-                                    "group": group_part,
-                                    "content": content.strip()
-                                })
-                            except:
-                                continue
+                                chunks.append({"source": source_part, "group": group_part, "content": content.strip()})
+                            except: continue
 
-                # Store transparency data
-                transparency_data = {
-                    "query": optimized_query,
-                    "chunks": chunks
-                }
+                transparency_data = {"query": optimized_query, "chunks": chunks}
                 
-                # Render AI Response
-                st.markdown(answer)
+                if isinstance(answer, DealExtraction):
+                    render_deal_extraction(answer)
+                else:
+                    st.markdown(answer)
                 
-                # FINAL UAT FIX: Conditional Transparency at the END
-                show_transparency = (
-                    optimized_query != "IRRELEVANT_QUERY" and 
-                    len(chunks) > 0 and 
-                    answer != REFUSAL_MSG
-                )
-                
+                show_transparency = (optimized_query != "IRRELEVANT_QUERY" and len(chunks) > 0 and answer != REFUSAL_MSG)
                 if show_transparency:
-                    with st.expander("🔍 Retrieval Transparency & Semantic Chunks"):
-                        st.info(f"**Optimized Search Query:** `{optimized_query}`")
+                    with st.expander("🔍 Retrieval Transparency"):
+                        st.info(f"**Optimized Query:** `{optimized_query}`")
                         for chunk in chunks:
-                            st.markdown(f"""
-                            <div class="chunk-card">
-                                <div>
-                                    <span class="metadata-badge">📄 {chunk['source']}</span>
-                                    <span class="metadata-badge">🛡️ {chunk['group']}</span>
-                                </div>
-                                <p style='margin-top:10px;'>{chunk['content']}</p>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {chunk['source']}</span><span class="metadata-badge">🛡️ {chunk['group']}</span></div><p style='margin-top:10px;'>{chunk['content']}</p></div>""", unsafe_allow_html=True)
                 
-                # Save to session state
                 msg_data = {"role": "assistant", "content": answer}
-                if show_transparency:
-                    msg_data["transparency"] = transparency_data
+                if show_transparency: msg_data["transparency"] = transparency_data
                 st.session_state.messages.append(msg_data)
-                
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
 
@@ -287,4 +303,4 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
 # FOOTER
 # ==========================================
 st.markdown("---")
-st.caption("Enterprise RAG v1.0 | Standardized Recursive Chunking | Local Llama 3.1 | Air-Gapped Security")
+st.caption("Enterprise Deal Analyzer v2.0 | Client-Server RAG | Air-Gapped Security")

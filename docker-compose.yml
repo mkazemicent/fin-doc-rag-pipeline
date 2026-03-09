@@ -1,0 +1,56 @@
+services:
+  app:
+    build: .
+    container_name: deal-analyzer-app
+    ports:
+      - "8501:8501"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - LLM_MODEL=${LLM_MODEL:-llama3.1}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-mxbai-embed-large}
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - chromadb
+      - ollama
+    networks:
+      - analyzer-network
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: deal-analyzer-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/chroma_db:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+    networks:
+      - analyzer-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: deal-analyzer-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_storage:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - analyzer-network
+
+networks:
+  analyzer-network:
+    driver: bridge
+
+volumes:
+  ollama_storage:

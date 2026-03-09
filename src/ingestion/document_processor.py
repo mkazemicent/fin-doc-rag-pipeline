@@ -101,11 +101,19 @@ def process_documents(raw_dir: str, processed_dir: str):
     raw_path = Path(raw_dir)
     processed_path = Path(processed_dir)
     
-    # Ensure the output directory exists, creating parents if necessary
+    # Ensure the output directory exists
     processed_path.mkdir(parents=True, exist_ok=True)
 
-    # Initialize the incremental ingestion tracker (SQLite + SHA-256)
-    db_path = str(raw_path.parent / "ingestion_state.db")
+    # --- ROBUST PATH RESOLUTION VIA ENV ---
+    # Prioritize the DATA_DIR env variable set in docker-compose.yml
+    data_root_str = os.getenv("DATA_DIR")
+    if data_root_str:
+        data_root = Path(data_root_str)
+    else:
+        # Fallback for local development
+        data_root = Path(__file__).resolve().parent.parent.parent / "data"
+
+    db_path = str(data_root / "ingestion_state.db")
     tracker = IngestionTracker(db_path)
     
     # Find all PDF files in the raw directory

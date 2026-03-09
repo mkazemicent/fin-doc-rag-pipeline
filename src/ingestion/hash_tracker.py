@@ -26,7 +26,8 @@ class IngestionTracker:
         """
         logger.info(f"IngestionTracker: opening database at {db_path}")
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        # Add a 20-second timeout to handle volume mount locking
+        self.conn = sqlite3.connect(db_path, timeout=20.0)
         self._create_table()
 
     # ------------------------------------------------------------------

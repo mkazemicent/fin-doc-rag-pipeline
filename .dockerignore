@@ -1,0 +1,30 @@
+# Source Control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+venv/
+.venv/
+
+# Local Data (Persisted via Docker Volumes instead)
+data/
+test_dir/
+*.sqlite3
+*.db
+
+# Project Metadata
+GEMINI.md
+docs/
+scripts/
+
+# Environments
+.env
+.env.local
+.env.example

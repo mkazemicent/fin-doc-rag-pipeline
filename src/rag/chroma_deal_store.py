@@ -1,145 +1,180 @@
-import os
+import hashlib
 import logging
-from typing import List, Optional
-from pathlib import Path
-from dotenv import load_dotenv
+from typing import Optional, List
 
 import chromadb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import TextLoader
+from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_experimental.text_splitter import SemanticChunker
 from src.ingestion.hash_tracker import IngestionTracker
+from src.config import Settings, get_settings
 
-# Load environment variables
-load_dotenv('.env.local')
-
-# Configure standard Python logging 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
-# --- ROBUST PATH RESOLUTION VIA ENV ---
-# Prioritize the DATA_DIR env variable set in docker-compose.yml
-DATA_ROOT_STR = os.getenv("DATA_DIR")
-if DATA_ROOT_STR:
-    DATA_ROOT = Path(DATA_ROOT_STR)
-else:
-    # Fallback for local development
-    DATA_ROOT = Path(__file__).resolve().parent.parent.parent / "data"
+# Module-level path constants derived from default settings.
+# These exist so that tests can patch them without instantiating a full Settings.
+_default = get_settings()
+PROCESSED_DATA_DIR = _default.processed_data_dir
+CHROMA_DB_DIR = _default.chroma_db_dir
+HASH_DB_PATH = _default.hash_db_path
+DATA_ROOT = _default.data_root
 
-PROCESSED_DATA_DIR = DATA_ROOT / "processed"
-CHROMA_DB_DIR = DATA_ROOT / "chroma_db"
-HASH_DB_PATH = DATA_ROOT / "ingestion_state.db"
 
 class ChromaDealStore:
     """
     Domain-specific wrapper for ChromaDB, handling financial document storage and retrieval.
-    Now uses Client-Server architecture to avoid file-locking conflicts.
+    Uses Client-Server architecture to avoid file-locking conflicts.
     """
-    def __init__(self):
+    def __init__(self, settings: Optional[Settings] = None):
+        self.settings = settings or get_settings()
+
         # 1. Initialize Embeddings
         self.embeddings = OllamaEmbeddings(
-            model=os.getenv("EMBEDDING_MODEL", "mxbai-embed-large"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            model=self.settings.embedding_model,
+            base_url=self.settings.ollama_base_url
         )
-        
+
         # 2. Connect to the ChromaDB Service (Client-Server Mode)
-        self.host = os.getenv("CHROMA_HOST", "localhost")
-        self.port = int(os.getenv("CHROMA_PORT", "8000"))
-        
-        logger.info(f"Connecting to ChromaDB Server at {self.host}:{self.port}")
-        
-        # Initialize the HTTP Client
-        self.client = chromadb.HttpClient(host=self.host, port=self.port)
-        
-        # Initialize the LangChain Chroma wrapper using the remote client
+        logger.info(f"Connecting to ChromaDB Server at {self.settings.chroma_host}:{self.settings.chroma_port}")
+
+        self.client = chromadb.HttpClient(
+            host=self.settings.chroma_host,
+            port=self.settings.chroma_port
+        )
+
+        # 3. Initialize the LangChain Chroma wrapper using the remote client
         self.vectorstore = Chroma(
             client=self.client,
-            collection_name="deal_documents",
+            collection_name=self.settings.collection_name,
             embedding_function=self.embeddings
         )
-        self.tracker_path = str(HASH_DB_PATH)
+        self.tracker_path = str(self.settings.hash_db_path)
 
-    def get_retriever(self, k: int = 8):
-        return self.vectorstore.as_retriever(search_kwargs={"k": k})
+    def get_retriever(self, k: Optional[int] = None):
+        k = k or self.settings.retriever_k
+        return self.vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": k,
+                "fetch_k": k * 4,
+                "lambda_mult": self.settings.mmr_lambda,
+            }
+        )
 
     def initialize_deal_store(self):
         """
         Reads processed .txt files, chunks them, and stores them in the remote ChromaDB.
+        Processes each file independently so a failed batch never marks a file as complete.
+        Uses deterministic chunk IDs to prevent duplication on re-ingestion.
         """
+        processed_dir = self.settings.processed_data_dir
+
         logger.info("=====================================================")
         logger.info("Initializing ChromaDealStore via Server Connection")
         logger.info(f"Using Tracker at: {self.tracker_path}")
         logger.info("=====================================================")
 
-        if not PROCESSED_DATA_DIR.exists():
-            logger.error(f"Processed data directory not found at {PROCESSED_DATA_DIR}")
+        if not processed_dir.exists():
+            logger.error(f"Processed data directory not found at {processed_dir}")
             return
 
         tracker = IngestionTracker(self.tracker_path)
-        
-        txt_files = list(PROCESSED_DATA_DIR.glob("*.txt"))
+
+        txt_files = list(processed_dir.glob("*.txt"))
         if not txt_files:
             logger.warning("No .txt files found to process.")
             tracker.close()
             return
 
-        documents = []
-        processed_file_paths = []
+        # Two-stage chunking:
+        # Stage 1: SemanticChunker detects topic boundaries via embeddings
+        # Stage 2: RecursiveCharacterTextSplitter caps oversized semantic chunks
+        semantic_chunker = SemanticChunker(
+            self.embeddings,
+            breakpoint_threshold_type="percentile",
+            breakpoint_threshold_amount=self.settings.semantic_threshold,
+        )
+        size_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.settings.chunk_size,
+            chunk_overlap=self.settings.chunk_overlap,
+            separators=["\n\n", "\n", ". ", " ", ""]
+        )
+
+        total_chunks = 0
+        files_processed = 0
 
         for txt_file in txt_files:
             normalized_name = txt_file.stem + ".pdf"
+
             if tracker.is_already_processed(str(txt_file)):
                 continue
-                
+
+            # Load and tag the document
             loader = TextLoader(str(txt_file), encoding="utf-8")
             loaded_docs = loader.load()
-            
+
             for doc in loaded_docs:
                 doc.metadata["source"] = normalized_name
                 doc.metadata["access_group"] = "general"
-                
-            documents.extend(loaded_docs)
-            processed_file_paths.append(txt_file)
-            
-        if not documents:
-            logger.info("INCREMENTAL SYNC: No new documents. Exiting.")
-            tracker.close()
-            return
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=150,
-            separators=["\n\n", "\n", ". ", " ", ""]
-        )
-        
-        chunked_documents = text_splitter.split_documents(documents)
-        logger.info(f"Created {len(chunked_documents)} chunks from {len(processed_file_paths)} files.")
+            # Two-stage chunking: semantic split → size-cap fallback
+            full_text = "\n\n".join(doc.page_content for doc in loaded_docs)
+            metadata = loaded_docs[0].metadata
 
-        # Batch Processing
-        BATCH_SIZE = 50
-        for i in range(0, len(chunked_documents), BATCH_SIZE):
-            batch = chunked_documents[i : i + BATCH_SIZE]
             try:
-                self.vectorstore.add_documents(documents=batch)
-                logger.info(f"Successfully sent batch {(i // BATCH_SIZE) + 1} to Chroma server.")
+                semantic_texts = semantic_chunker.split_text(full_text)
             except Exception as e:
-                logger.warning(f"Failed to send batch: {e}")
-                
-        if processed_file_paths:
-            for file_path in processed_file_paths:
-                tracker.mark_as_processed(str(file_path))
+                logger.warning(f"SemanticChunker failed for {normalized_name}, falling back to size-based: {e}")
+                semantic_texts = [full_text]
+
+            chunked_documents: List[Document] = []
+            for text in semantic_texts:
+                if len(text) > self.settings.max_chunk_size:
+                    sub_docs = size_splitter.split_documents(
+                        [Document(page_content=text, metadata=metadata.copy())]
+                    )
+                    chunked_documents.extend(sub_docs)
+                elif text.strip():
+                    chunked_documents.append(Document(page_content=text, metadata=metadata.copy()))
+
+            logger.info(f"Created {len(chunked_documents)} chunks from {normalized_name} (semantic + size-cap).")
+
+            # Generate deterministic IDs for each chunk
+            chunk_ids = [
+                hashlib.sha256(f"{normalized_name}::chunk::{idx}".encode()).hexdigest()
+                for idx in range(len(chunked_documents))
+            ]
+
+            # Batch insert with per-file failure tracking
+            batch_size = self.settings.batch_size
+            file_failed = False
+
+            for i in range(0, len(chunked_documents), batch_size):
+                batch = chunked_documents[i : i + batch_size]
+                batch_ids = chunk_ids[i : i + batch_size]
+                try:
+                    self.vectorstore.add_documents(documents=batch, ids=batch_ids)
+                    logger.info(f"Successfully sent batch {(i // batch_size) + 1} for {normalized_name}.")
+                except Exception as e:
+                    logger.error(f"Failed to send batch for {normalized_name}: {e}")
+                    file_failed = True
+
+            # Only mark as processed if ALL batches for this file succeeded
+            if not file_failed:
+                tracker.mark_as_processed(str(txt_file))
+                total_chunks += len(chunked_documents)
+                files_processed += 1
+            else:
+                logger.error(f"Skipping tracker update for {normalized_name} due to batch failure — will retry on next run.")
 
         tracker.close()
-        logger.info("Finished indexing deal documents.")
+        logger.info(f"Finished indexing: {files_processed} files, {total_chunks} chunks.")
 
     def delete_deal_document(self, filename: str):
-        """
-        Purges a document from the remote store and tracker.
-        """
+        """Purges a document from the remote store and tracker."""
         tracker = IngestionTracker(self.tracker_path)
         try:
             matches = self.vectorstore.get(where={"source": filename})
@@ -152,15 +187,33 @@ class ChromaDealStore:
         finally:
             tracker.close()
 
+    def reset_collection(self):
+        """Drops and recreates the collection for re-ingestion after chunking changes."""
+        logger.info(f"Resetting collection '{self.settings.collection_name}' and ingestion tracker.")
+        self.client.delete_collection(self.settings.collection_name)
+        self.vectorstore = Chroma(
+            client=self.client,
+            collection_name=self.settings.collection_name,
+            embedding_function=self.embeddings
+        )
+        tracker = IngestionTracker(self.tracker_path)
+        tracker.reset()
+        tracker.close()
+        logger.info("Collection and tracker reset complete.")
+
+
 def initialize_vector_store():
     """Compatibility wrapper for legacy calls."""
     store = ChromaDealStore()
     store.initialize_deal_store()
+
 
 def delete_document_from_db(filename: str, chroma_dir: str = None):
     """Compatibility wrapper for legacy calls."""
     store = ChromaDealStore()
     return store.delete_deal_document(filename)
 
+
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     initialize_vector_store()

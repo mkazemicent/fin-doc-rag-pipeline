@@ -1,29 +1,20 @@
-import os
 import sys
-import pandas as pd
 import logging
 from pathlib import Path
 from datasets import Dataset
-from dotenv import load_dotenv
 
 # --- PATH PRE-REQUISITE ---
-# scripts/evaluate_ragas.py is located inside the 'scripts' directory.
-# Resolve the project root to allow absolute imports from the 'src' package.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-# Load environment variables
-load_dotenv('.env.local')
-
 # Local Imports
 try:
-    from src.rag.agent import build_agent
+    from src.config import get_settings
+    from src.rag.deal_analyzer import build_deal_analyzer
     from langchain_ollama import ChatOllama, OllamaEmbeddings
     from ragas import evaluate
-    # 
     from ragas.metrics import faithfulness, answer_relevancy
-    # raga >= 0.2.x uses LangchainLLMWrapper and LangchainEmbeddingsWrapper
     from ragas.llms import LangchainLLMWrapper
     from ragas.embeddings import LangchainEmbeddingsWrapper
 except ImportError as e:
@@ -35,6 +26,8 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+settings = get_settings()
+
 # ==========================================
 # 1. LOCAL MODEL WRAPPERS
 # ==========================================
@@ -42,16 +35,16 @@ logger.info("Configuring local Ollama models for RAGAS evaluation...")
 
 # Critic/Judge LLM
 llm = ChatOllama(
-    model=os.getenv("LLM_MODEL", "llama3.1"),
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    model=settings.llm_model,
+    base_url=settings.ollama_base_url,
     temperature=0
 )
 critic_llm = LangchainLLMWrapper(llm)
 
 # Evaluator Embeddings
 embeddings = OllamaEmbeddings(
-    model=os.getenv("EMBEDDING_MODEL", "mxbai-embed-large"),
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    model=settings.embedding_model,
+    base_url=settings.ollama_base_url
 )
 critic_embeddings = LangchainEmbeddingsWrapper(embeddings)
 
@@ -78,7 +71,7 @@ eval_questions = [
 # 3. PIPELINE INTEGRATION (Data Collection)
 # ==========================================
 logger.info("Initializing Agent and gathering pipeline responses...")
-agent = build_agent()
+agent = build_deal_analyzer()
 
 questions = []
 answers = []
@@ -164,7 +157,7 @@ if 'answer_relevancy' in df_results.columns:
 print("="*50)
 
 # Save to CSV
-output_dir = PROJECT_ROOT / "data"
+output_dir = settings.data_root
 output_dir.mkdir(parents=True, exist_ok=True)
 csv_file = output_dir / "eval_results.csv"
 df_results.to_csv(csv_file, index=False)

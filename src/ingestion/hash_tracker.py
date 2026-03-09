@@ -146,6 +146,12 @@ class IngestionTracker:
             logger.warning(f"IngestionTracker: {filename} not found in database.")
             return False
 
+    def reset(self) -> None:
+        """Clear all tracking records. Used when re-ingestion is required (e.g. chunking strategy change)."""
+        self.conn.execute("DELETE FROM processed_files")
+        self.conn.commit()
+        logger.info("IngestionTracker: all tracking records cleared.")
+
     def close(self) -> None:
         """Close the underlying SQLite connection."""
         self.conn.close()

@@ -1,5 +1,3 @@
-import os
-import glob
 import logging
 from pathlib import Path
 from .hash_tracker import IngestionTracker
@@ -7,12 +5,8 @@ from langchain_community.document_loaders import PyPDFLoader
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_analyzer.nlp_engine import NlpEngineProvider
+from src.config import Settings, get_settings
 
-# Configure standard Python logging to output to the terminal at INFO level
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 class PIIMasker:
@@ -89,31 +83,25 @@ class PIIMasker:
         
         return anonymized_result.text
 
-def process_documents(raw_dir: str, processed_dir: str):
+def process_documents(raw_dir: str, processed_dir: str, settings: Settings = None):
     """
-    Iterates through all PDF files in the raw directory, extracts their text, 
+    Iterates through all PDF files in the raw directory, extracts their text,
     masks specific PII, and saves the output as .txt files in the processed directory.
-    
+
     Args:
         raw_dir (str): Directory path containing raw PDF documents.
         processed_dir (str): Directory path where masked text files will be saved.
+        settings: Optional Settings instance; defaults to global settings.
     """
+    settings = settings or get_settings()
+
     raw_path = Path(raw_dir)
     processed_path = Path(processed_dir)
-    
+
     # Ensure the output directory exists
     processed_path.mkdir(parents=True, exist_ok=True)
 
-    # --- ROBUST PATH RESOLUTION VIA ENV ---
-    # Prioritize the DATA_DIR env variable set in docker-compose.yml
-    data_root_str = os.getenv("DATA_DIR")
-    if data_root_str:
-        data_root = Path(data_root_str)
-    else:
-        # Fallback for local development
-        data_root = Path(__file__).resolve().parent.parent.parent / "data"
-
-    db_path = str(data_root / "ingestion_state.db")
+    db_path = str(settings.hash_db_path)
     tracker = IngestionTracker(db_path)
     
     # Find all PDF files in the raw directory
@@ -168,20 +156,17 @@ def process_documents(raw_dir: str, processed_dir: str):
     tracker.close()
 
 if __name__ == "__main__":
-    # Resolve the project root path based on the current file's location 
-    # Current location: src/ingestion/document_processor.py
-    # Project root is 3 levels up
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-    
-    # Define absolute paths for the raw and processed data directories
-    RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
-    PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
-    
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    settings = get_settings()
+    RAW_DATA_DIR = settings.data_root / "raw"
+    PROCESSED_DATA_DIR = settings.processed_data_dir
+
     logger.info("=====================================================")
     logger.info("Starting Deal Analytics Document Processing Workflow")
     logger.info(f"Targeting raw directory: {RAW_DATA_DIR}")
     logger.info("=====================================================")
-    
-    process_documents(str(RAW_DATA_DIR), str(PROCESSED_DATA_DIR))
-    
+
+    process_documents(str(RAW_DATA_DIR), str(PROCESSED_DATA_DIR), settings=settings)
+
     logger.info("Workflow completed.")

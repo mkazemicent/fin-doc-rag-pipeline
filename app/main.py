@@ -1,29 +1,33 @@
 import streamlit as st
 import sys
 import os
+import logging
 import requests
 import tempfile
 import shutil
+from html import escape
 from pathlib import Path
-from dotenv import load_dotenv
 
 # --- PATH PRE-REQUISITE ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-# Load environment variables
-load_dotenv('.env.local')
+# Centralized logging (single entry point)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Now we can safely import our local modules
 try:
-    from src.rag.deal_analyzer import build_deal_analyzer, DealExtraction
+    from src.config import get_settings
+    from src.rag.deal_analyzer import build_deal_analyzer, DealExtraction, IRRELEVANT_QUERY_TOKEN
     from src.ingestion.document_processor import process_documents
     from src.rag.chroma_deal_store import initialize_vector_store
     from langchain_core.messages import HumanMessage, AIMessage
 except ImportError as e:
     st.error(f"Failed to import agent modules. Check sys.path. Error: {e}")
     st.stop()
+
+settings = get_settings()
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -96,8 +100,8 @@ with st.sidebar:
     st.subheader("🛠️ Infrastructure")
     
     # Ollama Status
-    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    llm_model = os.getenv("LLM_MODEL", "llama3.1")
+    ollama_url = settings.ollama_base_url
+    llm_model = settings.llm_model
     
     try:
         ollama_response = requests.get(f"{ollama_url}/api/tags", timeout=2)
@@ -109,12 +113,12 @@ with st.sidebar:
                 st.warning(f"⚠️ Ollama Active, but {llm_model} not found.")
         else:
             st.error("❌ Ollama Service Unreachable")
-    except:
+    except Exception:
         st.error("❌ Ollama Service Offline")
     
     # ChromaDB (Server Connection Check)
-    chroma_host = os.getenv("CHROMA_HOST", "localhost")
-    chroma_port = os.getenv("CHROMA_PORT", "8000")
+    chroma_host = settings.chroma_host
+    chroma_port = settings.chroma_port
     # Using /api/v2/heartbeat as /api/v1/ is deprecated in latest Chroma
     chroma_url = f"http://{chroma_host}:{chroma_port}/api/v2/heartbeat"
     
@@ -125,11 +129,11 @@ with st.sidebar:
         else:
             # Fallback check for / if v2 is somehow not yet ready
             st.warning(f"⚠️ ChromaDB: Response {chroma_response.status_code}")
-    except:
+    except Exception:
         st.error("❌ ChromaDB: Offline/Unreachable")
          
     # Governance Tracker
-    TRACKER_PATH = PROJECT_ROOT / "data" / "ingestion_state.db"
+    TRACKER_PATH = settings.hash_db_path
     if TRACKER_PATH.exists():
          st.success("✅ Governance: Tracking Active")
     else:
@@ -142,25 +146,25 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload new PDF contract", type="pdf")
     
     if uploaded_file is not None:
-        raw_dir = PROJECT_ROOT / "data" / "raw"
+        raw_dir = settings.data_root / "raw"
         tmp_path = None
-        
+
         try:
             os.makedirs(raw_dir, exist_ok=True)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(uploaded_file.getbuffer())
                 tmp_path = tmp.name
-            
+
             final_pdf_path = raw_dir / uploaded_file.name
             shutil.move(tmp_path, final_pdf_path)
             st.success(f"✅ Securely saved: {uploaded_file.name}")
-            
+
             if st.button("🚀 Process & Embed"):
                 with st.spinner("Processing & PII Masking..."):
                     try:
-                        processed_dir = PROJECT_ROOT / "data" / "processed"
+                        processed_dir = settings.processed_data_dir
                         os.makedirs(processed_dir, exist_ok=True)
-                        process_documents(str(raw_dir), str(processed_dir))
+                        process_documents(str(raw_dir), str(processed_dir), settings=settings)
                         initialize_vector_store()
                         st.success("Analysis Engine Updated!")
                         st.balloons()
@@ -195,16 +199,16 @@ agent = load_agent()
 def render_deal_extraction(extraction: DealExtraction):
     """Renders the DealExtraction Pydantic model."""
     with st.container():
-        st.markdown(f"### 📅 Maturity Date: **{extraction.maturity_date}**")
+        st.markdown(f"### 📅 Maturity Date: **{escape(extraction.maturity_date)}**")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("#### 📝 Key Deal Terms")
             for term in extraction.deal_terms:
-                st.markdown(f"<div class='term-item'>{term}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='term-item'>{escape(term)}</div>", unsafe_allow_html=True)
         with col2:
             st.markdown("#### ⚠️ Risk Factors")
             for risk in extraction.risk_factors:
-                st.markdown(f"<div class='risk-item'>{risk}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='risk-item'>{escape(risk)}</div>", unsafe_allow_html=True)
 
 # ==========================================
 # CHAT INTERFACE
@@ -223,19 +227,19 @@ for message in st.session_state.messages:
             render_deal_extraction(message["content"])
         else:
             st.markdown(message["content"])
-        if "transparency" in message:
+        if "transparency" in message and message.get("routing_signal") == "relevant":
             t_data = message["transparency"]
-            if t_data.get("query") != "IRRELEVANT_QUERY" and t_data.get("chunks"):
+            if t_data.get("query") != IRRELEVANT_QUERY_TOKEN and t_data.get("chunks"):
                 with st.expander("🔍 Retrieval Transparency"):
                     st.info(f"**Optimized Query:** `{t_data['query']}`")
                     for chunk in t_data['chunks']:
                         st.markdown(f"""
                         <div class="chunk-card">
                             <div>
-                                <span class="metadata-badge">📄 {chunk['source']}</span>
-                                <span class="metadata-badge">🛡️ {chunk['group']}</span>
+                                <span class="metadata-badge">📄 {escape(chunk['source'])}</span>
+                                <span class="metadata-badge">🛡️ {escape(chunk['group'])}</span>
                             </div>
-                            <p style='margin-top:10px;'>{chunk['content']}</p>
+                            <p style='margin-top:10px;'>{escape(chunk['content'])}</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -249,7 +253,15 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
             try:
                 chat_history = []
                 for msg in st.session_state.messages[:-1]:
-                    content = str(msg["content"])
+                    if isinstance(msg["content"], DealExtraction):
+                        extraction = msg["content"]
+                        content = (
+                            f"Maturity Date: {extraction.maturity_date}. "
+                            f"Deal Terms: {', '.join(extraction.deal_terms)}. "
+                            f"Risk Factors: {', '.join(extraction.risk_factors)}."
+                        )
+                    else:
+                        content = str(msg["content"])
                     if msg["role"] == "user":
                         chat_history.append(HumanMessage(content=content))
                     else:
@@ -261,9 +273,8 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                 })
                 
                 answer = final_state.get("answer", REFUSAL_MSG)
-                if answer in ["relevant", "irrelevant"]:
-                    answer = REFUSAL_MSG
-                    
+                routing_signal = final_state.get("routing_signal", "")
+
                 raw_context = final_state.get("context", "")
                 optimized_query = final_state.get("optimized_query", "N/A")
                 
@@ -277,7 +288,7 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                                 source_part = header.split("|")[0].replace("SOURCE:", "").strip()
                                 group_part = header.split("|")[1].replace("GROUP:", "").strip()
                                 chunks.append({"source": source_part, "group": group_part, "content": content.strip()})
-                            except: continue
+                            except (ValueError, IndexError): continue
 
                 transparency_data = {"query": optimized_query, "chunks": chunks}
                 
@@ -286,14 +297,18 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                 else:
                     st.markdown(answer)
                 
-                show_transparency = (optimized_query != "IRRELEVANT_QUERY" and len(chunks) > 0 and answer != REFUSAL_MSG)
+                show_transparency = (
+                    routing_signal == "relevant"
+                    and optimized_query != IRRELEVANT_QUERY_TOKEN
+                    and len(chunks) > 0
+                )
                 if show_transparency:
                     with st.expander("🔍 Retrieval Transparency"):
                         st.info(f"**Optimized Query:** `{optimized_query}`")
                         for chunk in chunks:
-                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {chunk['source']}</span><span class="metadata-badge">🛡️ {chunk['group']}</span></div><p style='margin-top:10px;'>{chunk['content']}</p></div>""", unsafe_allow_html=True)
+                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {escape(chunk['source'])}</span><span class="metadata-badge">🛡️ {escape(chunk['group'])}</span></div><p style='margin-top:10px;'>{escape(chunk['content'])}</p></div>""", unsafe_allow_html=True)
                 
-                msg_data = {"role": "assistant", "content": answer}
+                msg_data = {"role": "assistant", "content": answer, "routing_signal": routing_signal}
                 if show_transparency: msg_data["transparency"] = transparency_data
                 st.session_state.messages.append(msg_data)
             except Exception as e:

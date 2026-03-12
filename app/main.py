@@ -164,7 +164,7 @@ with st.sidebar:
 
     # 3. Document Uploader
     st.subheader("📁 Ingest Deal Documents")
-    uploaded_file = st.file_uploader("Upload new PDF contract", type="pdf")
+    uploaded_file = st.file_uploader("Upload contract (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"])
     
     if uploaded_file is not None:
         raw_dir = settings.data_root / "raw"
@@ -172,13 +172,15 @@ with st.sidebar:
 
         try:
             os.makedirs(raw_dir, exist_ok=True)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp:
                 tmp.write(uploaded_file.getbuffer())
                 tmp_path = tmp.name
 
             final_pdf_path = raw_dir / uploaded_file.name
             shutil.move(tmp_path, final_pdf_path)
             st.success(f"✅ Securely saved: {uploaded_file.name}")
+
+            access_group = st.selectbox("Access Level:", ["general", "compliance", "confidential"])
 
             if st.button("🚀 Process & Embed"):
                 progress_bar = st.progress(0, text="Processing documents...")
@@ -198,7 +200,7 @@ with st.sidebar:
                         progress_callback=_update_progress,
                     )
                     progress_bar.progress(1.0, text="Embedding & storing...")
-                    ChromaDealStore(settings=settings).initialize_deal_store()
+                    ChromaDealStore(settings=settings).initialize_deal_store(access_group=access_group)
                     progress_bar.empty()
                     st.success("Analysis Engine Updated!")
                     st.balloons()
@@ -222,6 +224,16 @@ with st.sidebar:
 # ==========================================
 # UTILS
 # ==========================================
+_ACCESS_BADGE_STYLE: dict[str, str] = {
+    "general":      "background:#e9ecef;color:#495057",
+    "compliance":   "background:#fff3cd;color:#856404",
+    "confidential": "background:#f8d7da;color:#842029",
+}
+
+def _badge_style(access_group: str) -> str:
+    return _ACCESS_BADGE_STYLE.get(access_group, _ACCESS_BADGE_STYLE["general"])
+
+
 def render_deal_extraction(extraction: DealExtraction):
     """Renders the DealExtraction Pydantic model."""
     with st.container():
@@ -259,11 +271,12 @@ for message in st.session_state.messages:
                 with st.expander("🔍 Retrieval Transparency"):
                     st.info(f"**Optimized Query:** `{t_data['query']}`")
                     for chunk in t_data['chunks']:
+                        ag = chunk.metadata.get('access_group', 'general')
                         st.markdown(f"""
                         <div class="chunk-card">
                             <div>
                                 <span class="metadata-badge">📄 {escape(chunk.metadata.get('source', 'Unknown'))}</span>
-                                <span class="metadata-badge">🛡️ {escape(chunk.metadata.get('access_group', 'general'))}</span>
+                                <span class="metadata-badge" style="{_badge_style(ag)}">🛡️ {escape(ag)}</span>
                             </div>
                             <p style='margin-top:10px;'>{escape(chunk.page_content)}</p>
                         </div>
@@ -309,7 +322,8 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                     with st.expander("🔍 Retrieval Transparency"):
                         st.info(f"**Optimized Query:** `{optimized_query}`")
                         for chunk in chunks:
-                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {escape(chunk.metadata.get('source', 'Unknown'))}</span><span class="metadata-badge">🛡️ {escape(chunk.metadata.get('access_group', 'general'))}</span></div><p style='margin-top:10px;'>{escape(chunk.page_content)}</p></div>""", unsafe_allow_html=True)
+                            ag = chunk.metadata.get('access_group', 'general')
+                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {escape(chunk.metadata.get('source', 'Unknown'))}</span><span class="metadata-badge" style="{_badge_style(ag)}">🛡️ {escape(ag)}</span></div><p style='margin-top:10px;'>{escape(chunk.page_content)}</p></div>""", unsafe_allow_html=True)
                 
                 msg_data = {"role": "assistant", "content": answer, "routing_signal": routing_signal}
                 if show_transparency:

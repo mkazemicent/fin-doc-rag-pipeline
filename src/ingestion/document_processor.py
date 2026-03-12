@@ -9,6 +9,8 @@ from presidio_anonymizer import AnonymizerEngine
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 from src.config import Settings, get_settings
 
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+
 logger = logging.getLogger(__name__)
 
 class PIIMasker:
@@ -86,22 +88,31 @@ class PIIMasker:
         return anonymized_result.text
 
 def _process_single_file(
-    pdf_file: Path, processed_path: Path, masker: "PIIMasker"
+    input_file: Path, processed_path: Path, masker: "PIIMasker"
 ) -> Path:
-    """CPU-bound worker: load PDF → mask PII → write .txt.
+    """CPU-bound worker: load document (PDF/DOCX/TXT) → mask PII → write .txt.
 
     Returns output_file path on success.
     Raises on failure so the caller can log and continue.
     """
-    output_file = processed_path / f"{pdf_file.stem}.txt"
+    output_file = processed_path / f"{input_file.stem}.txt"
+    suffix = input_file.suffix.lower()
 
-    loader = PyPDFLoader(str(pdf_file))
-    pages = loader.load()
-    full_text = "\n".join([page.page_content for page in pages])
-
-    logger.info(
-        f"Successfully extracted {len(pages)} page(s) from {pdf_file.name}. Applying PII masking..."
-    )
+    if suffix == ".pdf":
+        loader = PyPDFLoader(str(input_file))
+        pages = loader.load()
+        full_text = "\n".join([page.page_content for page in pages])
+        logger.info(f"Extracted {len(pages)} page(s) from {input_file.name}. Applying PII masking...")
+    elif suffix == ".docx":
+        import docx
+        doc = docx.Document(str(input_file))
+        full_text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+        logger.info(f"Extracted {len(doc.paragraphs)} paragraph(s) from {input_file.name}. Applying PII masking...")
+    elif suffix == ".txt":
+        full_text = input_file.read_text(encoding="utf-8")
+        logger.info(f"Loaded plain text from {input_file.name}. Applying PII masking...")
+    else:
+        raise ValueError(f"Unsupported file format: {suffix}")
 
     masked_text = masker.mask_text(full_text)
 
@@ -137,13 +148,15 @@ def process_documents(raw_dir: str, processed_dir: str, settings: Optional[Setti
 
     db_path = str(settings.hash_db_path)
 
-    # Find all PDF files in the raw directory
-    pdf_files = list(raw_path.glob("*.pdf"))
+    # Find all supported documents in the raw directory
+    pdf_files = [
+        f for ext in SUPPORTED_EXTENSIONS for f in raw_path.glob(f"*{ext}")
+    ]
     if not pdf_files:
-        logger.info(f"No PDF files found in {raw_dir}")
+        logger.info(f"No supported documents found in {raw_dir}")
         return
 
-    logger.info(f"Found {len(pdf_files)} PDF file(s) to process in {raw_dir}")
+    logger.info(f"Found {len(pdf_files)} document(s) to process in {raw_dir}")
 
     # Instantiate the PIIMasker with the required en_core_web_lg SpaCy model
     if masker is None:

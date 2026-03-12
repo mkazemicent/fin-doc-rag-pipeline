@@ -70,13 +70,14 @@ def rewrite_node(state: AgentState, *, llm=None) -> dict:
 
     question = state["question"]
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"""You are a strictly constrained data extraction script. Your ONLY job is to extract financial keywords from a user query to use in a vector database search.
+        ("system", f"""You are a financial contract search optimizer. Extract 5-8 precise search terms from the user question for vector database retrieval.
 
-        RULES:
-        1. NEVER write conversational text.
-        2. If the query is non-financial (recipe, weather, trivia), output exactly: {IRRELEVANT_QUERY_TOKEN}
-        3. Use chat history to resolve references.
-        4. Output ONLY the raw keywords separated by spaces.
+        EXTRACTION RULES:
+        1. Always extract: party names, dollar amounts with currency, percentages, specific dates, defined terms in Title Case (e.g. Maturity Date, Borrowing Base, EBITDA Ratio).
+        2. Always extract: financial benchmarks by exact name (CORRA, SOFR, CDOR, Prime Rate) and covenant names (Debt to EBITDA, Interest Coverage Ratio, Current Ratio).
+        3. NEVER output conversational text, explanations, or punctuation.
+        4. If the query is non-financial (recipe, weather, trivia, code), output exactly: {IRRELEVANT_QUERY_TOKEN}
+        5. Output ONLY space-separated terms. Nothing else.
         """),
         ("placeholder", "{chat_history}"),
         ("human", "Optimize this question: {question}")
@@ -149,7 +150,15 @@ def grade_context_node(state: AgentState, *, llm=None, max_retries=3) -> dict:
         llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0, num_ctx=s.num_ctx, num_gpu=s.num_gpu)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "Evaluate if the provided context is relevant to the question. Output 'yes' or 'no'."),
+        ("system", """You are a strict financial document relevance evaluator.
+        Respond with only 'yes' or 'no'.
+
+        Answer 'yes' ONLY IF the context contains at least one of:
+        - A specific dollar amount, percentage, or date relevant to the question
+        - An exact defined term or covenant name from the question
+        - A party name or financial instrument name from the question
+
+        Answer 'no' if the context contains only general boilerplate, definitions unrelated to the question, or administrative clauses."""),
         ("human", "Question: {question} \n\nContext: {context}")
     ])
 

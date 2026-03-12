@@ -60,7 +60,7 @@ class ChromaDealStore:
             search_kwargs=search_kwargs,
         )
 
-    def initialize_deal_store(self) -> None:
+    def initialize_deal_store(self, access_group: str = "general") -> None:
         """
         Reads processed .txt files, chunks them, and stores them in the remote ChromaDB.
         Processes each file independently so a failed batch never marks a file as complete.
@@ -108,7 +108,7 @@ class ChromaDealStore:
 
                 for doc in loaded_docs:
                     doc.metadata["source"] = normalized_name
-                    doc.metadata["access_group"] = "general"
+                    doc.metadata["access_group"] = access_group
 
                 # Two-stage chunking: semantic split → size-cap fallback
                 full_text = "\n\n".join(doc.page_content for doc in loaded_docs)

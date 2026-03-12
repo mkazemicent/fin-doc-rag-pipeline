@@ -30,6 +30,13 @@ class IngestionTracker:
         self.conn = sqlite3.connect(db_path, timeout=20.0)
         self._create_table()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -70,6 +77,27 @@ class IngestionTracker:
             for chunk in iter(lambda: f.read(8192), b""):
                 sha256.update(chunk)
         return sha256.hexdigest()
+
+    def check_and_hash(self, file_path: str) -> tuple[bool, str]:
+        """
+        Compute the hash once and check whether the file is already processed.
+
+        Returns:
+            (is_processed, file_hash) tuple. Callers can pass file_hash
+            to mark_as_processed_with_hash() to avoid re-hashing.
+        """
+        current_hash = self.compute_hash(file_path)
+        filename = Path(file_path).name
+
+        row = self.conn.execute(
+            "SELECT file_hash FROM processed_files WHERE filename = ?",
+            (filename,),
+        ).fetchone()
+
+        if row is None:
+            return False, current_hash
+
+        return row[0] == current_hash, current_hash
 
     def is_already_processed(self, file_path: str) -> bool:
         """
@@ -122,6 +150,21 @@ class IngestionTracker:
         self.conn.commit()
         logger.info(f"IngestionTracker: recorded {filename} (hash: {file_hash[:12]}...)")
 
+    def mark_as_processed_with_hash(self, file_path: str, file_hash: str) -> None:
+        """Record file_path with a pre-computed hash (avoids re-reading the file)."""
+        filename = Path(file_path).name
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO processed_files (filename, file_hash, processed_at)
+            VALUES (?, ?, ?)
+            """,
+            (filename, file_hash, timestamp),
+        )
+        self.conn.commit()
+        logger.info(f"IngestionTracker: recorded {filename} (hash: {file_hash[:12]}...)")
+
     def remove_from_tracker(self, filename: str) -> bool:
         """
         Delete a file's hash record from the database.
@@ -138,7 +181,7 @@ class IngestionTracker:
         )
         self.conn.commit()
         deleted_count = cursor.rowcount
-        
+
         if deleted_count > 0:
             logger.info(f"IngestionTracker: removed {filename} from tracking.")
             return True

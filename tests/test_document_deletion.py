@@ -1,10 +1,8 @@
 import pytest
-import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.ingestion.hash_tracker import IngestionTracker
-from src.rag.chroma_deal_store import delete_document_from_db
 from langchain_core.documents import Document
 
 # ---------------------------------------------------------------------------
@@ -34,13 +32,13 @@ def test_remove_tracked_file(tracker, sample_file):
     """Mark a file as processed, then remove it and verify it's gone."""
     filename = str(sample_file.name)
     tracker.mark_as_processed(str(sample_file))
-    
+
     assert tracker.is_already_processed(str(sample_file)) is True
-    
+
     # Remove it
     removed = tracker.remove_from_tracker(filename)
     assert removed is True
-    
+
     # Verify it's no longer tracked
     assert tracker.is_already_processed(str(sample_file)) is False
 
@@ -55,51 +53,62 @@ def test_remove_nonexistent_file(tracker):
 def test_metadata_normalization():
     """ Verify that path-based .txt source is normalized to bare .pdf filename. """
     mock_doc = Document(
-        page_content="Text", 
+        page_content="Text",
         metadata={"source": "data/processed/amerigo_2015.txt"}
     )
-    
+
     # Logic matching ChromaDealStore
     source_path = Path(mock_doc.metadata.get("source", ""))
     normalized_source = source_path.stem + ".pdf"
-    
+
     assert normalized_source == "amerigo_2015.pdf"
 
 
 # ===========================================================================
-# Category 3 — ChromaDB Deletion (Mocked)
+# Category 3 — ChromaDB Deletion (Mocked via ChromaDealStore)
 # ===========================================================================
 
+@patch("src.rag.chroma_deal_store.chromadb")
+@patch("src.rag.chroma_deal_store.OllamaEmbeddings")
 @patch("src.rag.chroma_deal_store.Chroma")
-def test_delete_document_from_db_mocked(mock_chroma_class):
+def test_delete_document_from_store_mocked(mock_chroma_class, mock_embeddings, mock_chromadb):
     """
     Test the deletion logic flow without a live ChromaDB.
-    1. Mock Chroma instance.
+    1. Mock ChromaDealStore dependencies.
     2. Simulate finding 5 matching chunk IDs.
     3. Verify delete() is called with those IDs.
     """
+    from src.rag.chroma_deal_store import ChromaDealStore
+
     mock_vs = MagicMock()
     mock_chroma_class.return_value = mock_vs
-    
+
     # Simulate finding IDs for 'amerigo_2015.pdf'
     mock_vs.get.return_value = {"ids": ["chunk1", "chunk2", "chunk3", "chunk4", "chunk5"]}
-    
-    deleted_count = delete_document_from_db("amerigo_2015.pdf", chroma_dir="/tmp/mock_db")
-    
+
+    store = ChromaDealStore()
+    deleted_count = store.delete_deal_document("amerigo_2015.pdf")
+
     assert deleted_count == 5
     mock_vs.get.assert_called_once_with(where={"source": "amerigo_2015.pdf"})
     mock_vs.delete.assert_called_once_with(ids=["chunk1", "chunk2", "chunk3", "chunk4", "chunk5"])
 
+
+@patch("src.rag.chroma_deal_store.chromadb")
+@patch("src.rag.chroma_deal_store.OllamaEmbeddings")
 @patch("src.rag.chroma_deal_store.Chroma")
-def test_delete_nonexistent_document_mocked(mock_chroma_class):
+def test_delete_nonexistent_document_mocked(mock_chroma_class, mock_embeddings, mock_chromadb):
     """Verify that deleting a non-existent document returns 0."""
+    from src.rag.chroma_deal_store import ChromaDealStore
+
     mock_vs = MagicMock()
     mock_chroma_class.return_value = mock_vs
-    
+
     # Simulate no matches found
     mock_vs.get.return_value = {"ids": []}
-    
-    deleted_count = delete_document_from_db("ghost.pdf", chroma_dir="/tmp/mock_db")
-    
+
+    store = ChromaDealStore()
+    deleted_count = store.delete_deal_document("ghost.pdf")
+
     assert deleted_count == 0
     mock_vs.delete.assert_not_called()

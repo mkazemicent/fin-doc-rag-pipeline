@@ -6,9 +6,11 @@ from pydantic import BaseModel, Field
 
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.state import CompiledStateGraph
 from src.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -35,10 +37,20 @@ class AgentState(TypedDict):
     question: str
     optimized_query: str
     context: str
+    retrieved_docs: List[Document]
     routing_signal: str
     answer: Union[str, DealExtraction]
     retry_count: int
     chat_history: List[Union[HumanMessage, AIMessage]]
+    user_role: str
+
+
+# --- RBAC Role Mapping ---
+ROLE_ACCESS_GROUPS: dict[str, list[str]] = {
+    "general": ["general"],
+    "compliance": ["general", "compliance"],
+    "admin": ["general", "compliance", "confidential"],
+}
 
 
 # ==========================================================================
@@ -49,7 +61,7 @@ class AgentState(TypedDict):
 # via functools.partial so the LLM and retriever are created only once.
 # ==========================================================================
 
-def rewrite_node(state: AgentState, *, llm=None):
+def rewrite_node(state: AgentState, *, llm=None) -> dict:
     """Node 1: Rewrites the user's prompt to be highly optimized for Vector Search."""
     logger.info("--- NODE: OPTIMIZING SEARCH QUERY ---")
     if llm is None:
@@ -82,18 +94,23 @@ def rewrite_node(state: AgentState, *, llm=None):
     return {"optimized_query": optimized}
 
 
-def retrieve_node(state: AgentState, *, retriever=None, reranker=None):
+def retrieve_node(state: AgentState, *, retriever=None, store=None, reranker=None) -> dict:
     """Node 2: Retrieves context using the OPTIMIZED query, then reranks against the original question."""
     logger.info("--- NODE: RETRIEVING CONTEXT ---")
     optimized_query = state["optimized_query"]
 
     if optimized_query == IRRELEVANT_QUERY_TOKEN:
         logger.warning("Irrelevant query detected. Skipping ChromaDB retrieval.")
-        return {"context": "", "routing_signal": QueryStatus.IRRELEVANT}
+        return {"context": "", "retrieved_docs": [], "routing_signal": QueryStatus.IRRELEVANT}
 
+    # Retriever resolution: injected retriever (tests) > store with RBAC filter > fallback default
     if retriever is None:
-        from src.rag.chroma_deal_store import ChromaDealStore
-        retriever = ChromaDealStore().get_retriever()
+        if store is None:
+            from src.rag.chroma_deal_store import ChromaDealStore
+            store = ChromaDealStore()
+        user_role = state.get("user_role", "general")
+        allowed_groups = ROLE_ACCESS_GROUPS.get(user_role, ["general"])
+        retriever = store.get_retriever(where_filter={"access_group": {"$in": allowed_groups}})
 
     try:
         docs = retriever.invoke(optimized_query)
@@ -111,13 +128,13 @@ def retrieve_node(state: AgentState, *, retriever=None, reranker=None):
             context_list.append(f"SOURCE: {source} | GROUP: {group}\n{doc.page_content}")
 
         context = "\n\n---\n\n".join(context_list)
-        return {"context": context}
+        return {"context": context, "retrieved_docs": docs}
     except Exception as e:
         logger.error(f"Retrieval error: {e}")
-        return {"context": "", "routing_signal": QueryStatus.ERROR}
+        return {"context": "", "retrieved_docs": [], "routing_signal": QueryStatus.ERROR}
 
 
-def grade_context_node(state: AgentState, *, llm=None, max_retries=3):
+def grade_context_node(state: AgentState, *, llm=None, max_retries=3) -> dict:
     """Node 3: Evaluates if the retrieved context is relevant."""
     logger.info("--- NODE: GRADING RETRIEVED CONTEXT ---")
     context = state.get("context", "")
@@ -145,7 +162,7 @@ def grade_context_node(state: AgentState, *, llm=None, max_retries=3):
         return {"routing_signal": QueryStatus.IRRELEVANT, "retry_count": retry_count + 1}
 
 
-def generate_node(state: AgentState, *, llm=None):
+def generate_node(state: AgentState, *, llm=None) -> dict:
     """Node 4: Generates the structured DealExtraction answer or a refusal."""
     logger.info("--- NODE: GENERATING ANSWER ---")
     question = state["question"]
@@ -185,7 +202,7 @@ def generate_node(state: AgentState, *, llm=None):
         return {"answer": "Failed to generate structured extraction for this document."}
 
 
-def decide_to_generate(state: AgentState, *, max_retries=3):
+def decide_to_generate(state: AgentState, *, max_retries=3) -> str:
     """Routing Function: decides whether to generate or retry the query."""
     signal = state.get("routing_signal", QueryStatus.IRRELEVANT)
     retry_count = state.get("retry_count", 0)
@@ -199,7 +216,7 @@ def decide_to_generate(state: AgentState, *, max_retries=3):
 # GRAPH BUILDER
 # ==========================================================================
 
-def build_deal_analyzer(settings: Optional[Settings] = None):
+def build_deal_analyzer(settings: Optional[Settings] = None) -> CompiledStateGraph:
     """Builds the Deal Analytics LangGraph with injected dependencies."""
     settings = settings or get_settings()
     logger.info("Building Deal Analyzer State Machine...")
@@ -212,7 +229,7 @@ def build_deal_analyzer(settings: Optional[Settings] = None):
     )
 
     from src.rag.chroma_deal_store import ChromaDealStore
-    retriever = ChromaDealStore(settings=settings).get_retriever()
+    store_obj = ChromaDealStore(settings=settings)
 
     # FlashRank cross-encoder reranker (CPU-only, zero VRAM)
     from langchain_community.document_compressors import FlashrankRerank
@@ -227,7 +244,7 @@ def build_deal_analyzer(settings: Optional[Settings] = None):
     workflow = StateGraph(AgentState)
 
     workflow.add_node("rewrite", partial(rewrite_node, llm=llm))
-    workflow.add_node("retrieve", partial(retrieve_node, retriever=retriever, reranker=reranker))
+    workflow.add_node("retrieve", partial(retrieve_node, store=store_obj, reranker=reranker))
     workflow.add_node("grade_context", partial(grade_context_node, llm=llm, max_retries=max_retries))
     workflow.add_node("generate", partial(generate_node, llm=llm))
 

@@ -213,3 +213,4 @@ ingestion_state.db
 test_live_routing.py
 GEMINI.md
 .env.local
+test_dir/

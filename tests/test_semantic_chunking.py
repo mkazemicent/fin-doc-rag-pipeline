@@ -1,8 +1,8 @@
-import pytest
 from unittest.mock import MagicMock, patch
 from langchain_core.documents import Document
 
 from src.config import Settings
+from src.rag.utils import size_cap_chunk
 
 
 # ===========================================================================
@@ -12,39 +12,13 @@ from src.config import Settings
 class TestTwoStageChunking:
     """Verify that two-stage chunking preserves section boundaries and applies size caps."""
 
-    def _two_stage_chunk(self, full_text, metadata, max_chunk_size=1500, chunk_size=800, chunk_overlap=150):
-        """Mirrors the two-stage chunking logic from chroma_deal_store.py."""
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-        # We mock the semantic chunker in tests (it requires embedding calls)
-        # Instead, test the size-cap fallback logic directly
-        size_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", ". ", " ", ""]
-        )
-
-        chunked: list[Document] = []
-        # Simulate semantic_texts as pre-split sections
-        semantic_texts = full_text.split("\n\n")
-
-        for text in semantic_texts:
-            if len(text) > max_chunk_size:
-                sub_docs = size_splitter.split_documents(
-                    [Document(page_content=text, metadata=metadata.copy())]
-                )
-                chunked.extend(sub_docs)
-            elif text.strip():
-                chunked.append(Document(page_content=text, metadata=metadata.copy()))
-
-        return chunked
-
     def test_small_sections_stay_intact(self):
         """Sections smaller than max_chunk_size should not be re-split."""
         text = "Section 1: Short content.\n\nSection 2: Also short."
         metadata = {"source": "deal.pdf", "access_group": "general"}
 
-        chunks = self._two_stage_chunk(text, metadata, max_chunk_size=1500)
+        semantic_texts = text.split("\n\n")
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500)
 
         assert len(chunks) == 2
         assert chunks[0].page_content == "Section 1: Short content."
@@ -56,7 +30,8 @@ class TestTwoStageChunking:
         text = f"Short section.\n\n{long_section}"
         metadata = {"source": "deal.pdf", "access_group": "general"}
 
-        chunks = self._two_stage_chunk(text, metadata, max_chunk_size=1500, chunk_size=800)
+        semantic_texts = text.split("\n\n")
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500, chunk_size=800)
 
         # Short section stays intact
         assert chunks[0].page_content == "Short section."
@@ -69,7 +44,8 @@ class TestTwoStageChunking:
         text = f"Short header.\n\n{long_section}"
         metadata = {"source": "contract.pdf", "access_group": "general"}
 
-        chunks = self._two_stage_chunk(text, metadata, max_chunk_size=1500)
+        semantic_texts = text.split("\n\n")
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500)
 
         for chunk in chunks:
             assert chunk.metadata["source"] == "contract.pdf"
@@ -80,7 +56,8 @@ class TestTwoStageChunking:
         text = "Section 1.\n\n   \n\nSection 2."
         metadata = {"source": "deal.pdf", "access_group": "general"}
 
-        chunks = self._two_stage_chunk(text, metadata)
+        semantic_texts = text.split("\n\n")
+        chunks = size_cap_chunk(semantic_texts, metadata)
 
         assert len(chunks) == 2
         assert all(chunk.page_content.strip() for chunk in chunks)
@@ -121,7 +98,9 @@ class TestSemanticChunkerFallback:
 
             mock_tracker = MagicMock()
             mock_tracker_class.return_value = mock_tracker
-            mock_tracker.is_already_processed.return_value = False
+            mock_tracker.__enter__ = MagicMock(return_value=mock_tracker)
+            mock_tracker.__exit__ = MagicMock(return_value=False)
+            mock_tracker.check_and_hash.return_value = (False, "fakehash123")
 
             mock_loader.return_value.load.return_value = [
                 Document(page_content="Some financial content about a credit agreement.", metadata={})

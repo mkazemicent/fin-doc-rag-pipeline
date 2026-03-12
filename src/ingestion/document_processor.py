@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Optional
 from .hash_tracker import IngestionTracker
 from langchain_community.document_loaders import PyPDFLoader
 from presidio_analyzer import AnalyzerEngine
@@ -83,7 +84,7 @@ class PIIMasker:
         
         return anonymized_result.text
 
-def process_documents(raw_dir: str, processed_dir: str, settings: Settings = None):
+def process_documents(raw_dir: str, processed_dir: str, settings: Optional[Settings] = None, masker: Optional["PIIMasker"] = None) -> None:
     """
     Iterates through all PDF files in the raw directory, extracts their text,
     masks specific PII, and saves the output as .txt files in the processed directory.
@@ -92,6 +93,7 @@ def process_documents(raw_dir: str, processed_dir: str, settings: Settings = Non
         raw_dir (str): Directory path containing raw PDF documents.
         processed_dir (str): Directory path where masked text files will be saved.
         settings: Optional Settings instance; defaults to global settings.
+        masker: Optional PIIMasker instance; created if not provided.
     """
     settings = settings or get_settings()
 
@@ -102,8 +104,7 @@ def process_documents(raw_dir: str, processed_dir: str, settings: Settings = Non
     processed_path.mkdir(parents=True, exist_ok=True)
 
     db_path = str(settings.hash_db_path)
-    tracker = IngestionTracker(db_path)
-    
+
     # Find all PDF files in the raw directory
     pdf_files = list(raw_path.glob("*.pdf"))
     if not pdf_files:
@@ -111,49 +112,49 @@ def process_documents(raw_dir: str, processed_dir: str, settings: Settings = Non
         return
 
     logger.info(f"Found {len(pdf_files)} PDF file(s) to process in {raw_dir}")
-    
+
     # Instantiate the PIIMasker with the required en_core_web_lg SpaCy model
-    masker = PIIMasker(model_name="en_core_web_lg")
-    
-    # Iterate through each PDF file to extract text and mask PII
-    for pdf_file in pdf_files:
-        logger.info(f"Processing started for file: {pdf_file.name}")
-        
-        # --- Incremental Ingestion Gate ---
-        if tracker.is_already_processed(str(pdf_file)):
-            logger.info(f"SKIPPED (already processed, unchanged): {pdf_file.name}")
-            continue
+    if masker is None:
+        masker = PIIMasker(model_name="en_core_web_lg")
 
-        try:
-            # Construct the output .txt file path
-            output_file = processed_path / f"{pdf_file.stem}.txt"
-            
-            # Load the PDF using LangChain's PyPDFLoader
-            loader = PyPDFLoader(str(pdf_file))
-            pages = loader.load()
-            
-            # Extract and combine the text from all pages in the PDF
-            full_text = "\n".join([page.page_content for page in pages])
-            
-            logger.info(f"Successfully extracted {len(pages)} page(s) from {pdf_file.name}. Applying PII masking...")
-            
-            # Mask the PII in the combined text
-            masked_text = masker.mask_text(full_text)
-            
-            # Save the masked text to the processed directory
-            with open(output_file, "w", encoding="utf-8") as f:
-                f.write(masked_text)
-                
-            logger.info(f"Successfully processed and saved masked content to: {output_file.name}")
-            
-            # Record this file as successfully processed
-            tracker.mark_as_processed(str(pdf_file))
-            
-        except Exception as e:
-            logger.error(f"Error processing {pdf_file.name}: {e}")
+    with IngestionTracker(db_path) as tracker:
+        # Iterate through each PDF file to extract text and mask PII
+        for pdf_file in pdf_files:
+            logger.info(f"Processing started for file: {pdf_file.name}")
 
-    # Close the tracker database connection
-    tracker.close()
+            # --- Incremental Ingestion Gate ---
+            already_processed, file_hash = tracker.check_and_hash(str(pdf_file))
+            if already_processed:
+                logger.info(f"SKIPPED (already processed, unchanged): {pdf_file.name}")
+                continue
+
+            try:
+                # Construct the output .txt file path
+                output_file = processed_path / f"{pdf_file.stem}.txt"
+
+                # Load the PDF using LangChain's PyPDFLoader
+                loader = PyPDFLoader(str(pdf_file))
+                pages = loader.load()
+
+                # Extract and combine the text from all pages in the PDF
+                full_text = "\n".join([page.page_content for page in pages])
+
+                logger.info(f"Successfully extracted {len(pages)} page(s) from {pdf_file.name}. Applying PII masking...")
+
+                # Mask the PII in the combined text
+                masked_text = masker.mask_text(full_text)
+
+                # Save the masked text to the processed directory
+                with open(output_file, "w", encoding="utf-8") as f:
+                    f.write(masked_text)
+
+                logger.info(f"Successfully processed and saved masked content to: {output_file.name}")
+
+                # Record this file as successfully processed
+                tracker.mark_as_processed_with_hash(str(pdf_file), file_hash)
+
+            except Exception as e:
+                logger.error(f"Error processing {pdf_file.name}: {e}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

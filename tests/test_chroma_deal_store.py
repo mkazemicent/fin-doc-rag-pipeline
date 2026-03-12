@@ -1,47 +1,42 @@
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from langchain_core.documents import Document
 from src.config import Settings
-from src.rag.chroma_deal_store import ChromaDealStore, initialize_vector_store
+from src.rag.chroma_deal_store import ChromaDealStore
+from src.rag.utils import size_cap_chunk
 
 # ===========================================================================
 # Category 1 — Metadata Integrity
 # ===========================================================================
 
 class TestMetadataIntegrity:
-    """Validate that chunking preserves critical metadata."""
+    """Validate that size_cap_chunk preserves critical metadata through both stages."""
 
-    def test_metadata_preservation_during_split(self):
-        """
-        CRITICAL: Verify that access_group and source are preserved
-        into every chunk.
-        """
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
+    def test_metadata_preservation_small_sections(self):
+        """Metadata must survive pass-through for sections under max_chunk_size."""
+        metadata = {"source": "deal_v1.pdf", "access_group": "general"}
+        semantic_texts = ["Short section about credit terms."]
 
-        # Prepare dummy parent doc
-        parent_doc = Document(
-            page_content="Long text about credit agreements. Section 1. Section 2.",
-            metadata={"source": "deal_v1.pdf", "access_group": "general"}
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500)
+
+        assert len(chunks) == 1
+        assert chunks[0].metadata["source"] == "deal_v1.pdf"
+        assert chunks[0].metadata["access_group"] == "general"
+
+    def test_metadata_preservation_oversized_sections(self):
+        """Metadata must survive re-splitting for sections exceeding max_chunk_size."""
+        metadata = {"source": "deal_v1.pdf", "access_group": "compliance"}
+        long_text = "Financial covenant details. " * 200  # ~5400 chars
+        semantic_texts = [long_text]
+
+        chunks = size_cap_chunk(
+            semantic_texts, metadata, max_chunk_size=1500, chunk_size=800
         )
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=20,
-            chunk_overlap=0
-        )
-
-        chunks = text_splitter.split_documents([parent_doc])
-
-        # Manually ensure our logic (which we verify in initialize_deal_store) works
-        for chunk in chunks:
-            chunk.metadata.update(parent_doc.metadata)
-
-        # Assertions
         assert len(chunks) > 1
         for chunk in chunks:
             assert chunk.metadata["source"] == "deal_v1.pdf"
-            assert chunk.metadata["access_group"] == "general"
+            assert chunk.metadata["access_group"] == "compliance"
 
 # ===========================================================================
 # Category 2 — Batch Processing Fault Tolerance
@@ -68,12 +63,14 @@ class TestBatchProcessingResilience:
              patch("src.rag.chroma_deal_store.TextLoader") as mock_loader, \
              patch("src.rag.chroma_deal_store.OllamaEmbeddings"), \
              patch("src.rag.chroma_deal_store.SemanticChunker") as mock_semantic_class, \
-             patch("src.rag.chroma_deal_store.RecursiveCharacterTextSplitter") as mock_splitter_class, \
+             patch("src.rag.utils.RecursiveCharacterTextSplitter") as mock_splitter_class, \
              patch("src.rag.chroma_deal_store.chromadb"):
 
             mock_tracker = MagicMock()
             mock_tracker_class.return_value = mock_tracker
-            mock_tracker.is_already_processed.return_value = False
+            mock_tracker.__enter__ = MagicMock(return_value=mock_tracker)
+            mock_tracker.__exit__ = MagicMock(return_value=False)
+            mock_tracker.check_and_hash.return_value = (False, "fakehash123")
 
             mock_loader.return_value.load.return_value = [Document(page_content="test", metadata={})]
 
@@ -100,7 +97,7 @@ class TestBatchProcessingResilience:
 
             assert mock_vs.add_documents.call_count == 3
             # File should NOT be marked as processed due to batch failure
-            assert not mock_tracker.mark_as_processed.called
+            assert not mock_tracker.mark_as_processed_with_hash.called
 
 # ===========================================================================
 # Category 3 — Settings Injection Validation
@@ -115,7 +112,7 @@ def test_vector_store_uses_settings():
 
     with patch("src.rag.chroma_deal_store.OllamaEmbeddings") as mock_embeddings, \
          patch("src.rag.chroma_deal_store.chromadb"):
-        store = ChromaDealStore(settings=test_settings)
+        ChromaDealStore(settings=test_settings)
 
         mock_embeddings.assert_called_once_with(
             model="test-embed",

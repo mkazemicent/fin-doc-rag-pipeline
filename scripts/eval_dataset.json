@@ -1,0 +1,202 @@
+[
+  {
+    "question": "What is the maturity date for the Cheeb Royalties credit agreement?",
+    "ground_truth": "The maturity date for the Cheeb Royalties credit agreement is July 31, 2026."
+  },
+  {
+    "question": "What is the maximum amount of the standby line of credit for Amerigo 2015?",
+    "ground_truth": "The maximum amount of the standby line of credit is $70,000,000."
+  },
+  {
+    "question": "Is CORRA mentioned in the Bank of Canada loan provisions?",
+    "ground_truth": "Yes, the Bank of Canada loan document discusses CORRA based loan provisions."
+  },
+  {
+    "question": "What is the maturity date for the Amerigo 2015 standby credit facility?",
+    "ground_truth": "The maturity date for the Amerigo 2015 standby credit facility is stated in the agreement's repayment schedule."
+  },
+  {
+    "question": "When does the revolving credit facility under the Bank of Canada loan agreement expire?",
+    "ground_truth": "The revolving credit facility expiration date is defined in the term section of the Bank of Canada loan provisions."
+  },
+  {
+    "question": "Does the Cheeb Royalties agreement include an option to extend the maturity date?",
+    "ground_truth": "The agreement specifies the conditions under which the maturity date may be extended, subject to lender approval."
+  },
+  {
+    "question": "What happens to outstanding principal if the Amerigo 2015 facility is not renewed before maturity?",
+    "ground_truth": "Outstanding principal becomes immediately due and payable on the maturity date if the facility is not renewed."
+  },
+  {
+    "question": "Is there an automatic renewal clause in the Cheeb Royalties credit agreement?",
+    "ground_truth": "The Cheeb Royalties credit agreement does not contain an automatic renewal clause; renewal requires written notice."
+  },
+  {
+    "question": "What is the total committed credit limit under the Bank of Canada loan agreement?",
+    "ground_truth": "The total committed credit limit is specified in the credit facility schedule of the Bank of Canada loan agreement."
+  },
+  {
+    "question": "Can the borrower request an increase to the credit limit under the Amerigo 2015 facility?",
+    "ground_truth": "The Amerigo 2015 facility includes an accordion feature allowing the borrower to request an increase subject to lender consent."
+  },
+  {
+    "question": "What is the minimum drawdown amount permitted under the Cheeb Royalties agreement?",
+    "ground_truth": "The minimum drawdown amount is defined in the drawdown conditions section of the Cheeb Royalties agreement."
+  },
+  {
+    "question": "Are there any sublimits within the Amerigo 2015 standby line of credit for letters of credit?",
+    "ground_truth": "The Amerigo 2015 agreement specifies a sublimit for letters of credit within the overall standby line of credit."
+  },
+  {
+    "question": "What currency is the Cheeb Royalties credit facility denominated in?",
+    "ground_truth": "The Cheeb Royalties credit facility is denominated in Canadian dollars."
+  },
+  {
+    "question": "What is the aggregate maximum exposure permitted across all tranches in the Bank of Canada loan?",
+    "ground_truth": "The aggregate maximum exposure across all tranches is capped as specified in the credit agreement's tranche schedule."
+  },
+  {
+    "question": "What benchmark rate is used to calculate the floating interest rate in the Amerigo 2015 agreement?",
+    "ground_truth": "The Amerigo 2015 agreement uses the Canadian Overnight Repo Rate Average (CORRA) as the floating rate benchmark."
+  },
+  {
+    "question": "What is the credit spread applied to the CORRA rate in the Bank of Canada loan provisions?",
+    "ground_truth": "The credit spread applied to the CORRA rate is specified in the pricing schedule of the Bank of Canada loan provisions."
+  },
+  {
+    "question": "Does the Cheeb Royalties agreement reference the Bank of Canada prime rate?",
+    "ground_truth": "The Cheeb Royalties agreement references the Bank of Canada prime rate as a fallback rate for interest calculations."
+  },
+  {
+    "question": "What is the default interest rate applicable upon an event of default in the Amerigo 2015 facility?",
+    "ground_truth": "Upon an event of default, the default interest rate increases by a penalty spread above the regular contract rate as defined in the agreement."
+  },
+  {
+    "question": "Is the interest rate on the Bank of Canada loan fixed or floating?",
+    "ground_truth": "The interest rate on the Bank of Canada loan is floating, tied to CORRA plus an applicable credit margin."
+  },
+  {
+    "question": "What is the interest payment frequency under the Cheeb Royalties credit agreement?",
+    "ground_truth": "Interest payments under the Cheeb Royalties credit agreement are due monthly on the last business day of each month."
+  },
+  {
+    "question": "What is the maximum debt-to-EBITDA ratio covenant in the Amerigo 2015 agreement?",
+    "ground_truth": "The Amerigo 2015 agreement requires the borrower to maintain a debt-to-EBITDA ratio not exceeding the threshold specified in the financial covenants schedule."
+  },
+  {
+    "question": "Does the Cheeb Royalties agreement include a minimum liquidity covenant?",
+    "ground_truth": "The Cheeb Royalties agreement includes a minimum liquidity covenant requiring the borrower to maintain a specified cash reserve."
+  },
+  {
+    "question": "What is the minimum interest coverage ratio required under the Bank of Canada loan provisions?",
+    "ground_truth": "The Bank of Canada loan provisions require the borrower to maintain a minimum interest coverage ratio as defined in the financial maintenance covenants."
+  },
+  {
+    "question": "How frequently must the borrower certify compliance with financial covenants under the Amerigo 2015 facility?",
+    "ground_truth": "The borrower must deliver a compliance certificate quarterly, within 60 days of each fiscal quarter end."
+  },
+  {
+    "question": "What constitutes a covenant breach under the Cheeb Royalties credit agreement?",
+    "ground_truth": "A covenant breach occurs when the borrower fails to maintain the agreed financial ratios or breaches any negative covenant as defined in the agreement."
+  },
+  {
+    "question": "Does the Bank of Canada loan include a clean-down provision on the revolving facility?",
+    "ground_truth": "The Bank of Canada loan includes a clean-down provision requiring the revolving facility to be reduced to zero for a minimum number of consecutive days per year."
+  },
+  {
+    "question": "What key risk factors are identified in the Cheeb Royalties credit agreement?",
+    "ground_truth": "Key risk factors include commodity price volatility, counterparty credit risk, and regulatory changes affecting royalty streams."
+  },
+  {
+    "question": "Are there environmental liability risk factors disclosed in the Amerigo 2015 agreement?",
+    "ground_truth": "The Amerigo 2015 agreement identifies environmental liability as a material risk factor given the nature of the borrower's operations."
+  },
+  {
+    "question": "Does the Bank of Canada loan provisions document identify currency exchange risk?",
+    "ground_truth": "Currency exchange risk is identified in the risk factors section, particularly for cross-border transactions and USD-denominated obligations."
+  },
+  {
+    "question": "What operational risks are disclosed in the Cheeb Royalties agreement?",
+    "ground_truth": "Operational risks disclosed include production disruptions, key personnel dependency, and reliance on third-party operators."
+  },
+  {
+    "question": "Are there concentration risk provisions in the Amerigo 2015 standby credit facility?",
+    "ground_truth": "The Amerigo 2015 agreement includes provisions addressing concentration risk related to borrower sector exposure."
+  },
+  {
+    "question": "What events of default are listed in the Cheeb Royalties credit agreement?",
+    "ground_truth": "Events of default include payment default, covenant breach, insolvency, material adverse change, and cross-default triggers."
+  },
+  {
+    "question": "Is there a grace period for payment default under the Amerigo 2015 facility?",
+    "ground_truth": "The Amerigo 2015 facility provides a grace period of a specified number of business days for payment defaults before the lender may accelerate."
+  },
+  {
+    "question": "What is the cross-default threshold in the Bank of Canada loan agreement?",
+    "ground_truth": "The cross-default provision is triggered when the borrower defaults on any other indebtedness exceeding the threshold amount specified in the agreement."
+  },
+  {
+    "question": "Does the Cheeb Royalties agreement contain a material adverse change clause?",
+    "ground_truth": "Yes, the Cheeb Royalties agreement includes a material adverse change clause that constitutes an event of default if triggered."
+  },
+  {
+    "question": "What collateral secures the Amerigo 2015 standby line of credit?",
+    "ground_truth": "The Amerigo 2015 standby line of credit is secured by a general security agreement over all present and after-acquired property of the borrower."
+  },
+  {
+    "question": "Are there any real property mortgages securing the Bank of Canada loan?",
+    "ground_truth": "The Bank of Canada loan security package includes a mortgage over specified real property assets of the borrower."
+  },
+  {
+    "question": "Does the Cheeb Royalties agreement grant the lender a priority security interest in royalty receivables?",
+    "ground_truth": "The Cheeb Royalties agreement grants the lender a first-priority security interest in royalty receivables as part of the collateral package."
+  },
+  {
+    "question": "Is there a negative pledge covenant in the Amerigo 2015 credit facility?",
+    "ground_truth": "The Amerigo 2015 credit facility includes a negative pledge covenant prohibiting the borrower from granting additional security interests without lender consent."
+  },
+  {
+    "question": "What standby fees are payable on the undrawn portion of the Amerigo 2015 credit facility?",
+    "ground_truth": "A standby fee is payable on the undrawn portion of the facility at the rate specified in the fee schedule of the agreement."
+  },
+  {
+    "question": "Are there prepayment penalties in the Cheeb Royalties credit agreement?",
+    "ground_truth": "The Cheeb Royalties agreement specifies prepayment conditions; certain prepayments during the restricted period attract a make-whole premium."
+  },
+  {
+    "question": "What upfront arrangement fee was charged for the Bank of Canada loan facility?",
+    "ground_truth": "The upfront arrangement fee is disclosed in the fee letter associated with the Bank of Canada loan, payable on the closing date."
+  },
+  {
+    "question": "Is there an annual administration fee payable to the lender under the Amerigo 2015 agreement?",
+    "ground_truth": "An annual administration fee is payable to the agent bank as specified in the fee schedule of the Amerigo 2015 agreement."
+  },
+  {
+    "question": "Which of the deals in the document corpus have the earliest maturity date?",
+    "ground_truth": "Based on the available documents, the deal with the earliest maturity date can be identified by comparing the term schedules across all agreements."
+  },
+  {
+    "question": "Do any of the agreements reference CDOR as an interest rate benchmark?",
+    "ground_truth": "CDOR references may appear in legacy provisions of the agreements as it was the predecessor benchmark to CORRA in Canadian markets."
+  },
+  {
+    "question": "Which agreements include a sustainability-linked pricing adjustment?",
+    "ground_truth": "Not found in document — none of the reviewed agreements include a sustainability-linked pricing adjustment mechanism."
+  },
+  {
+    "question": "Across all documents, which deal has the largest committed credit facility?",
+    "ground_truth": "The Amerigo 2015 standby line of credit at $70,000,000 represents the largest committed facility across the reviewed documents."
+  },
+  {
+    "question": "What is a good recipe for beef bourguignon?",
+    "ground_truth": "I am a strictly air-gapped financial assistant designed to analyze Canadian corporate contracts. I cannot fulfill non-financial requests such as recipes, code generation, or general trivia."
+  },
+  {
+    "question": "Can you write a Python function to sort a list?",
+    "ground_truth": "I am a strictly air-gapped financial assistant designed to analyze Canadian corporate contracts. I cannot fulfill non-financial requests such as recipes, code generation, or general trivia."
+  },
+  {
+    "question": "What is the current weather in Toronto?",
+    "ground_truth": "I am a strictly air-gapped financial assistant designed to analyze Canadian corporate contracts. I cannot fulfill non-financial requests such as recipes, code generation, or general trivia."
+  }
+]

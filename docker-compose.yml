@@ -20,7 +20,7 @@ services:
       - analyzer-network
 
   chromadb:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:1.5.4
     container_name: deal-analyzer-chroma
     ports:
       - "8000:8000"
@@ -32,7 +32,7 @@ services:
       - analyzer-network
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.6.2
     container_name: deal-analyzer-ollama
     ports:
       - "11434:11434"

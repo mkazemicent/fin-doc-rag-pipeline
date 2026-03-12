@@ -20,8 +20,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 try:
     from src.config import get_settings
     from src.rag.deal_analyzer import build_deal_analyzer, DealExtraction, IRRELEVANT_QUERY_TOKEN
+    from src.rag.utils import evaluate_show_transparency, serialize_for_history, should_render_transparency
     from src.ingestion.document_processor import process_documents
-    from src.rag.chroma_deal_store import initialize_vector_store
+    from src.rag.chroma_deal_store import ChromaDealStore
     from langchain_core.messages import HumanMessage, AIMessage
 except ImportError as e:
     st.error(f"Failed to import agent modules. Check sys.path. Error: {e}")
@@ -89,6 +90,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
+# AGENT INITIALIZATION (CACHED)
+# ==========================================
+@st.cache_resource
+def load_agent():
+    return build_deal_analyzer()
+
+@st.cache_resource
+def load_masker():
+    from src.ingestion.document_processor import PIIMasker
+    return PIIMasker(model_name="en_core_web_lg")
+
+agent = load_agent()
+
+# ==========================================
 # SIDEBAR: SYSTEM DIAGNOSTICS & INGESTION
 # ==========================================
 with st.sidebar:
@@ -140,8 +155,14 @@ with st.sidebar:
          st.info("ℹ️ Governance: Initializing...")
 
     st.markdown("---")
-    
-    # 2. Document Uploader
+
+    # 2. User Role (RBAC)
+    st.subheader("🔐 User Role")
+    user_role = st.selectbox("Select role:", ["general", "compliance", "admin"], index=0)
+
+    st.markdown("---")
+
+    # 3. Document Uploader
     st.subheader("📁 Ingest Deal Documents")
     uploaded_file = st.file_uploader("Upload new PDF contract", type="pdf")
     
@@ -164,8 +185,8 @@ with st.sidebar:
                     try:
                         processed_dir = settings.processed_data_dir
                         os.makedirs(processed_dir, exist_ok=True)
-                        process_documents(str(raw_dir), str(processed_dir), settings=settings)
-                        initialize_vector_store()
+                        process_documents(str(raw_dir), str(processed_dir), settings=settings, masker=load_masker())
+                        ChromaDealStore(settings=settings).initialize_deal_store()
                         st.success("Analysis Engine Updated!")
                         st.balloons()
                     except Exception as e:
@@ -183,15 +204,6 @@ with st.sidebar:
     if st.button("🗑️ Clear Chat History"):
         st.session_state.messages = []
         st.rerun()
-
-# ==========================================
-# AGENT INITIALIZATION (CACHED)
-# ==========================================
-@st.cache_resource
-def load_agent():
-    return build_deal_analyzer()
-
-agent = load_agent()
 
 # ==========================================
 # UTILS
@@ -227,7 +239,7 @@ for message in st.session_state.messages:
             render_deal_extraction(message["content"])
         else:
             st.markdown(message["content"])
-        if "transparency" in message and message.get("routing_signal") == "relevant":
+        if should_render_transparency(message):
             t_data = message["transparency"]
             if t_data.get("query") != IRRELEVANT_QUERY_TOKEN and t_data.get("chunks"):
                 with st.expander("🔍 Retrieval Transparency"):
@@ -236,10 +248,10 @@ for message in st.session_state.messages:
                         st.markdown(f"""
                         <div class="chunk-card">
                             <div>
-                                <span class="metadata-badge">📄 {escape(chunk['source'])}</span>
-                                <span class="metadata-badge">🛡️ {escape(chunk['group'])}</span>
+                                <span class="metadata-badge">📄 {escape(chunk.metadata.get('source', 'Unknown'))}</span>
+                                <span class="metadata-badge">🛡️ {escape(chunk.metadata.get('access_group', 'general'))}</span>
                             </div>
-                            <p style='margin-top:10px;'>{escape(chunk['content'])}</p>
+                            <p style='margin-top:10px;'>{escape(chunk.page_content)}</p>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -253,15 +265,7 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
             try:
                 chat_history = []
                 for msg in st.session_state.messages[:-1]:
-                    if isinstance(msg["content"], DealExtraction):
-                        extraction = msg["content"]
-                        content = (
-                            f"Maturity Date: {extraction.maturity_date}. "
-                            f"Deal Terms: {', '.join(extraction.deal_terms)}. "
-                            f"Risk Factors: {', '.join(extraction.risk_factors)}."
-                        )
-                    else:
-                        content = str(msg["content"])
+                    content = serialize_for_history(msg["content"])
                     if msg["role"] == "user":
                         chat_history.append(HumanMessage(content=content))
                     else:
@@ -269,26 +273,15 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
 
                 final_state = agent.invoke({
                     "question": prompt,
-                    "chat_history": chat_history
+                    "chat_history": chat_history,
+                    "user_role": user_role,
                 })
-                
+
                 answer = final_state.get("answer", REFUSAL_MSG)
                 routing_signal = final_state.get("routing_signal", "")
 
-                raw_context = final_state.get("context", "")
                 optimized_query = final_state.get("optimized_query", "N/A")
-                
-                chunks = []
-                if raw_context:
-                    raw_chunks = raw_context.split("\n\n---\n\n")
-                    for rc in raw_chunks:
-                        if "\n" in rc:
-                            try:
-                                header, content = rc.split("\n", 1)
-                                source_part = header.split("|")[0].replace("SOURCE:", "").strip()
-                                group_part = header.split("|")[1].replace("GROUP:", "").strip()
-                                chunks.append({"source": source_part, "group": group_part, "content": content.strip()})
-                            except (ValueError, IndexError): continue
+                chunks = final_state.get("retrieved_docs", [])
 
                 transparency_data = {"query": optimized_query, "chunks": chunks}
                 
@@ -297,19 +290,16 @@ if prompt := st.chat_input("Ask a question about your portfolio..."):
                 else:
                     st.markdown(answer)
                 
-                show_transparency = (
-                    routing_signal == "relevant"
-                    and optimized_query != IRRELEVANT_QUERY_TOKEN
-                    and len(chunks) > 0
-                )
+                show_transparency = evaluate_show_transparency(routing_signal, optimized_query, chunks)
                 if show_transparency:
                     with st.expander("🔍 Retrieval Transparency"):
                         st.info(f"**Optimized Query:** `{optimized_query}`")
                         for chunk in chunks:
-                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {escape(chunk['source'])}</span><span class="metadata-badge">🛡️ {escape(chunk['group'])}</span></div><p style='margin-top:10px;'>{escape(chunk['content'])}</p></div>""", unsafe_allow_html=True)
+                            st.markdown(f"""<div class="chunk-card"><div><span class="metadata-badge">📄 {escape(chunk.metadata.get('source', 'Unknown'))}</span><span class="metadata-badge">🛡️ {escape(chunk.metadata.get('access_group', 'general'))}</span></div><p style='margin-top:10px;'>{escape(chunk.page_content)}</p></div>""", unsafe_allow_html=True)
                 
                 msg_data = {"role": "assistant", "content": answer, "routing_signal": routing_signal}
-                if show_transparency: msg_data["transparency"] = transparency_data
+                if show_transparency:
+                    msg_data["transparency"] = transparency_data
                 st.session_state.messages.append(msg_data)
             except Exception as e:
                 st.error(f"Analysis failed: {e}")

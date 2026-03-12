@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 from src.ingestion.hash_tracker import IngestionTracker
 

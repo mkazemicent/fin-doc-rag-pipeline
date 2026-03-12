@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 from langchain_core.documents import Document
 
@@ -101,7 +100,7 @@ class TestRerankerIntegration:
             "chat_history": []
         }
 
-        result = retrieve_node(state, retriever=mock_retriever, reranker=mock_reranker)
+        retrieve_node(state, retriever=mock_retriever, reranker=mock_reranker)
         mock_reranker.compress_documents.assert_not_called()
 
 
@@ -157,3 +156,21 @@ class TestMMRRetrieverConfig:
         call_kwargs = mock_vs.as_retriever.call_args[1]
         assert call_kwargs["search_kwargs"]["k"] == 10
         assert call_kwargs["search_kwargs"]["fetch_k"] == 40
+
+    @patch("src.rag.chroma_deal_store.Chroma")
+    @patch("src.rag.chroma_deal_store.OllamaEmbeddings")
+    @patch("src.rag.chroma_deal_store.chromadb")
+    def test_retriever_passes_rbac_filter(self, mock_chromadb, mock_embeddings, mock_chroma):
+        """Verify that a provided filter is passed into search_kwargs."""
+        from src.rag.chroma_deal_store import ChromaDealStore
+
+        test_settings = Settings(retriever_k=20, mmr_lambda=0.7)
+        mock_vs = MagicMock()
+        mock_chroma.return_value = mock_vs
+
+        store = ChromaDealStore(settings=test_settings)
+        rbac_filter = {"access_group": {"$in": ["general", "compliance"]}}
+        store.get_retriever(where_filter=rbac_filter)
+
+        call_kwargs = mock_vs.as_retriever.call_args[1]
+        assert call_kwargs["search_kwargs"]["filter"] == {"access_group": {"$in": ["general", "compliance"]}}

@@ -1,15 +1,12 @@
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.config import Settings
 from src.rag.chroma_deal_store import ChromaDealStore
-from langchain_core.documents import Document
 
 @patch("src.rag.chroma_deal_store.Chroma")
 @patch("src.rag.chroma_deal_store.OllamaEmbeddings")
 @patch("src.rag.chroma_deal_store.SemanticChunker")
-@patch("src.rag.chroma_deal_store.RecursiveCharacterTextSplitter")
+@patch("src.rag.utils.RecursiveCharacterTextSplitter")
 def test_full_ingestion_lifecycle(mock_splitter_class, mock_semantic_class, mock_embeddings, mock_chroma, tmp_path):
     """
     Integration Test:

@@ -30,10 +30,12 @@ class Settings(BaseSettings):
     semantic_threshold: int = 85
 
     # Retrieval
-    retriever_k: int = 15
-    rerank_top_n: int = 4
+    retriever_k: int = 30
+    fetch_k_multiplier: int = 10
+    rerank_top_n: int = 6
     mmr_lambda: float = 0.7
     reranker_model: str = "ms-marco-MiniLM-L-12-v2"
+    min_chunk_chars: int = 150
     batch_size: int = 50
     max_retries: int = 3
 

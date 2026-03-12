@@ -50,7 +50,7 @@ class ChromaDealStore:
         k = k or self.settings.retriever_k
         search_kwargs = {
             "k": k,
-            "fetch_k": k * 4,
+            "fetch_k": k * self.settings.fetch_k_multiplier,
             "lambda_mult": self.settings.mmr_lambda,
         }
         if where_filter:
@@ -111,20 +111,46 @@ class ChromaDealStore:
                     doc.metadata["access_group"] = access_group
 
                 # Two-stage chunking: semantic split → size-cap fallback
-                full_text = "\n\n".join(doc.page_content for doc in loaded_docs)
+                # TextLoader produces one Document per file, so we pre-batch
+                # the text into paragraph-sized segments (≤6000 chars) before
+                # calling SemanticChunker. This keeps each embedding call within
+                # nomic-embed-text's 8192-token context window on any size document.
+                _MAX_SEMANTIC_CHARS = 6000
                 metadata = loaded_docs[0].metadata
+                full_text = loaded_docs[0].page_content
 
-                try:
-                    semantic_texts = semantic_chunker.split_text(full_text)
-                except Exception as e:
-                    logger.warning(f"SemanticChunker failed for {normalized_name}, falling back to size-based: {e}")
-                    semantic_texts = [full_text]
+                # Batch paragraphs into segments within the model's context limit
+                paragraphs = [p for p in full_text.split('\n') if p.strip()]
+                segments: list[str] = []
+                buffer: list[str] = []
+                buffer_len = 0
+                for para in paragraphs:
+                    if buffer_len + len(para) > _MAX_SEMANTIC_CHARS and buffer:
+                        segments.append('\n'.join(buffer))
+                        buffer, buffer_len = [], 0
+                    buffer.append(para)
+                    buffer_len += len(para) + 1
+                if buffer:
+                    segments.append('\n'.join(buffer))
+
+                semantic_texts = []
+                for segment in segments:
+                    try:
+                        semantic_texts.extend(semantic_chunker.split_text(segment))
+                    except Exception as e:
+                        logger.warning(f"SemanticChunker failed on segment of {normalized_name}, using segment as-is: {e}")
+                        semantic_texts.append(segment)
+
+                if not semantic_texts:
+                    logger.warning(f"No text extracted from {normalized_name}, skipping.")
+                    continue
 
                 chunked_documents = size_cap_chunk(
                     semantic_texts, metadata,
                     max_chunk_size=self.settings.max_chunk_size,
                     chunk_size=self.settings.chunk_size,
                     chunk_overlap=self.settings.chunk_overlap,
+                    min_chunk_chars=self.settings.min_chunk_chars,
                 )
 
                 logger.info(f"Created {len(chunked_documents)} chunks from {normalized_name} (semantic + size-cap).")

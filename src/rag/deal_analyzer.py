@@ -30,7 +30,7 @@ class DealExtraction(BaseModel):
     """Structured extraction of financial deal details from corporate contracts."""
     deal_terms: List[str] = Field(description="Key financial terms, covenants, and conditions of the deal.")
     risk_factors: List[str] = Field(description="Potential risks, liabilities, or negative conditions identified.")
-    maturity_date: str = Field(description="The date when the deal, agreement, or financial instrument expires or matures.")
+    maturity_date: str = Field(description="The date or term when the deal expires or matures. Accept explicit dates (e.g. 'June 12, 2029') OR duration terms (e.g. '5 years from original issuance'). If neither is present, use 'Not found in document'.")
 
 # --- Agent State ---
 class AgentState(TypedDict):
@@ -75,9 +75,14 @@ def rewrite_node(state: AgentState, *, llm=None) -> dict:
         EXTRACTION RULES:
         1. Always extract: party names, dollar amounts with currency, percentages, specific dates, defined terms in Title Case (e.g. Maturity Date, Borrowing Base, EBITDA Ratio).
         2. Always extract: financial benchmarks by exact name (CORRA, SOFR, CDOR, Prime Rate) and covenant names (Debt to EBITDA, Interest Coverage Ratio, Current Ratio).
-        3. NEVER output conversational text, explanations, or punctuation.
-        4. If the query is non-financial (recipe, weather, trivia, code), output exactly: {IRRELEVANT_QUERY_TOKEN}
-        5. Output ONLY space-separated terms. Nothing else.
+        3. Domain enrichment — apply ALL that are relevant:
+           - Benchmark replacement / rate transition in Canadian agreements → also add: CDOR CORRA alternate rate Canadian Benchmark Transition Event
+           - Any mention of BIP, BIP Bermuda, or BIPC → also add: BIP BERMUDA HOLDINGS I LIMITED BIPC Borrower Lender subordinate
+           - Interest rate type comparison (Term CORRA vs Daily Compounded CORRA) → also add: CARR loan mechanics CDOR Daily Compounded
+           - Prepayment, repayment, or mandatory payment questions → also add: prepayment compensation voluntary Tranche anniversary
+        4. NEVER output conversational text, explanations, or punctuation.
+        5. If the query is non-financial (recipe, weather, trivia, code), output exactly: {IRRELEVANT_QUERY_TOKEN}
+        6. Output ONLY space-separated terms. Nothing else.
         """),
         ("placeholder", "{chat_history}"),
         ("human", "Optimize this question: {question}")
@@ -92,7 +97,8 @@ def rewrite_node(state: AgentState, *, llm=None) -> dict:
         optimized = question
 
     logger.info(f"Optimized Query : {optimized}")
-    return {"optimized_query": optimized}
+    # Reset routing_signal so grade_context always does real grading on retry
+    return {"optimized_query": optimized, "routing_signal": ""}
 
 
 def retrieve_node(state: AgentState, *, retriever=None, store=None, reranker=None) -> dict:
@@ -116,6 +122,22 @@ def retrieve_node(state: AgentState, *, retriever=None, store=None, reranker=Non
     try:
         docs = retriever.invoke(optimized_query)
         logger.info(f"Retrieved {len(docs)} candidates via MMR.")
+
+        # Filter out noise: short chunks, signature blocks, and fill-in boilerplate
+        # embed near the centroid of embedding space and crowd out substantive content.
+        s = get_settings()
+        min_chars = s.min_chunk_chars
+        def _is_boilerplate(text: str) -> bool:
+            stripped = text.strip()
+            if len(stripped) < min_chars:
+                return True
+            # Signature blocks: high ratio of underscores or blank lines
+            non_ws = stripped.replace("_", "").replace("-", "").replace(".", "").replace("\n", "").replace(" ", "")
+            if len(non_ws) < len(stripped) * 0.25:
+                return True
+            return False
+        docs = [d for d in docs if not _is_boilerplate(d.page_content)]
+        logger.info(f"After boilerplate filter: {len(docs)} candidates remaining.")
 
         # Rerank against the original question for precision
         if reranker and docs:
@@ -150,15 +172,18 @@ def grade_context_node(state: AgentState, *, llm=None, max_retries=3) -> dict:
         llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0, num_ctx=s.num_ctx, num_gpu=s.num_gpu)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a strict financial document relevance evaluator.
+        ("system", """You are a financial document relevance evaluator.
         Respond with only 'yes' or 'no'.
 
-        Answer 'yes' ONLY IF the context contains at least one of:
-        - A specific dollar amount, percentage, or date relevant to the question
-        - An exact defined term or covenant name from the question
-        - A party name or financial instrument name from the question
+        Answer 'yes' if the context contains ANY of the following from the question:
+        - A party name, company name, or counterparty mentioned in the question
+        - A financial instrument name, facility name, or agreement name from the question
+        - A dollar amount, percentage, interest rate, or date that appears in the question
+        - A defined term, covenant name, or section heading from the question
 
-        Answer 'no' if the context contains only general boilerplate, definitions unrelated to the question, or administrative clauses."""),
+        Answer 'no' ONLY if the context contains NO mention of any entity, instrument, amount, or term from the question whatsoever — i.e. it is completely unrelated.
+
+        Do NOT require the context to directly answer the question. Partial or indirect information is sufficient for 'yes'."""),
         ("human", "Question: {question} \n\nContext: {context}")
     ])
 
@@ -179,7 +204,11 @@ def generate_node(state: AgentState, *, llm=None) -> dict:
     routing_signal = state.get("routing_signal", "")
 
     if routing_signal == QueryStatus.IRRELEVANT:
-        return {"answer": "I am a strictly air-gapped financial assistant designed to analyze Canadian corporate contracts. I cannot fulfill non-financial requests such as recipes, code generation, or general trivia."}
+        # Non-financial query: return air-gapped refusal
+        if state.get("optimized_query") == IRRELEVANT_QUERY_TOKEN:
+            return {"answer": "I am a strictly air-gapped financial assistant designed to analyze Canadian corporate contracts. I cannot fulfill non-financial requests such as recipes, code generation, or general trivia."}
+        # Financial query where no relevant context was found after all retries
+        return {"answer": "I cannot find this information in the provided deal documents."}
 
     if routing_signal == QueryStatus.ERROR or not context:
         return {"answer": "I cannot find this information in the provided deal documents."}
@@ -192,8 +221,13 @@ def generate_node(state: AgentState, *, llm=None) -> dict:
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", "You are a Senior Deal Desk Analyst. Extract precise financial terms from corporate contracts. "
-                   "Your goal is to fill the DealExtraction schema based ONLY on the provided context. "
-                   "If a field is missing in the text, provide a 'Not found in document' value. \n\nContext:\n{context}"),
+                   "Your goal is to fill the DealExtraction schema based ONLY on the provided context.\n\n"
+                   "EXTRACTION RULES:\n"
+                   "- maturity_date: Use an explicit date if present. If only a term/duration is stated (e.g. '5 years from original issuance'), use that duration as the value. Only use 'Not found in document' if no date OR duration is mentioned.\n"
+                   "- deal_terms: List specific financial terms, amounts, rates, and covenants found in the context.\n"
+                   "- risk_factors: List specific risks, obligations, or negative conditions from the context.\n"
+                   "- For any field with no information at all in the context, use 'Not found in document'.\n\n"
+                   "Context:\n{context}"),
         ("placeholder", "{chat_history}"),
         ("human", "{question}")
     ])

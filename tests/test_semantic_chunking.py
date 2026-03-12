@@ -18,7 +18,7 @@ class TestTwoStageChunking:
         metadata = {"source": "deal.pdf", "access_group": "general"}
 
         semantic_texts = text.split("\n\n")
-        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500)
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500, min_chunk_chars=0)
 
         assert len(chunks) == 2
         assert chunks[0].page_content == "Section 1: Short content."
@@ -31,7 +31,7 @@ class TestTwoStageChunking:
         metadata = {"source": "deal.pdf", "access_group": "general"}
 
         semantic_texts = text.split("\n\n")
-        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500, chunk_size=800)
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500, chunk_size=800, min_chunk_chars=0)
 
         # Short section stays intact
         assert chunks[0].page_content == "Short section."
@@ -57,7 +57,7 @@ class TestTwoStageChunking:
         metadata = {"source": "deal.pdf", "access_group": "general"}
 
         semantic_texts = text.split("\n\n")
-        chunks = size_cap_chunk(semantic_texts, metadata)
+        chunks = size_cap_chunk(semantic_texts, metadata, min_chunk_chars=0)
 
         assert len(chunks) == 2
         assert all(chunk.page_content.strip() for chunk in chunks)
@@ -82,7 +82,10 @@ class TestSemanticChunkerFallback:
 
         processed_dir = tmp_path / "processed"
         processed_dir.mkdir()
-        (processed_dir / "deal.txt").write_text("Some financial content about a credit agreement.")
+        (processed_dir / "deal.txt").write_text(
+            "This credit agreement contains financial covenants and benchmark replacement provisions "
+            "for Term CORRA and Daily Compounded CORRA as applicable under Canadian securities law."
+        )
 
         test_settings = Settings(data_dir=tmp_path)
 
@@ -103,7 +106,13 @@ class TestSemanticChunkerFallback:
             mock_tracker.check_and_hash.return_value = (False, "fakehash123")
 
             mock_loader.return_value.load.return_value = [
-                Document(page_content="Some financial content about a credit agreement.", metadata={})
+                Document(
+                    page_content=(
+                        "This credit agreement contains financial covenants and benchmark replacement provisions "
+                        "for Term CORRA and Daily Compounded CORRA as applicable under Canadian securities law."
+                    ),
+                    metadata={}
+                )
             ]
 
             store = ChromaDealStore(settings=test_settings)

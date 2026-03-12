@@ -10,8 +10,10 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "llama3.1"
-    embedding_model: str = "mxbai-embed-large"
+    llm_model: str = "qwen2.5:14b"
+    embedding_model: str = "nomic-embed-text"
+    num_ctx: int = 8192
+    num_gpu: int = 35
 
     # ChromaDB
     chroma_host: str = "localhost"
@@ -22,14 +24,14 @@ class Settings(BaseSettings):
     data_dir: Optional[Path] = None
 
     # Chunking
-    chunk_size: int = 800
-    chunk_overlap: int = 150
-    max_chunk_size: int = 1500
-    semantic_threshold: int = 70
+    chunk_size: int = 600
+    chunk_overlap: int = 100
+    max_chunk_size: int = 1200
+    semantic_threshold: int = 85
 
     # Retrieval
-    retriever_k: int = 20
-    rerank_top_n: int = 5
+    retriever_k: int = 15
+    rerank_top_n: int = 4
     mmr_lambda: float = 0.7
     reranker_model: str = "ms-marco-MiniLM-L-12-v2"
     batch_size: int = 50

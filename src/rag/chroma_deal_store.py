@@ -26,7 +26,8 @@ class ChromaDealStore:
         # 1. Initialize Embeddings
         self.embeddings = OllamaEmbeddings(
             model=self.settings.embedding_model,
-            base_url=self.settings.ollama_base_url
+            base_url=self.settings.ollama_base_url,
+            num_ctx=self.settings.num_ctx,
         )
 
         # 2. Connect to the ChromaDB Service (Client-Server Mode)

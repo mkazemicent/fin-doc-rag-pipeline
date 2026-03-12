@@ -116,5 +116,6 @@ def test_vector_store_uses_settings():
 
         mock_embeddings.assert_called_once_with(
             model="test-embed",
-            base_url="http://test-ollama:11434"
+            base_url="http://test-ollama:11434",
+            num_ctx=8192,
         )

@@ -71,7 +71,9 @@ def test_agent_nodes_use_settings(mock_chat_ollama):
         mock_chat_ollama.assert_called_with(
             model="test-llm",
             base_url="http://test-ollama:11434",
-            temperature=0
+            temperature=0,
+            num_ctx=8192,
+            num_gpu=35,
         )
 
 @patch("src.rag.deal_analyzer.ChatOllama")

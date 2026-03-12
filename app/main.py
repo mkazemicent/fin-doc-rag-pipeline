@@ -181,16 +181,30 @@ with st.sidebar:
             st.success(f"✅ Securely saved: {uploaded_file.name}")
 
             if st.button("🚀 Process & Embed"):
-                with st.spinner("Processing & PII Masking..."):
-                    try:
-                        processed_dir = settings.processed_data_dir
-                        os.makedirs(processed_dir, exist_ok=True)
-                        process_documents(str(raw_dir), str(processed_dir), settings=settings, masker=load_masker())
-                        ChromaDealStore(settings=settings).initialize_deal_store()
-                        st.success("Analysis Engine Updated!")
-                        st.balloons()
-                    except Exception as e:
-                        st.error(f"Ingestion failed: {e}")
+                progress_bar = st.progress(0, text="Processing documents...")
+                try:
+                    processed_dir = settings.processed_data_dir
+                    os.makedirs(processed_dir, exist_ok=True)
+
+                    def _update_progress(completed, total):
+                        progress_bar.progress(
+                            completed / total,
+                            text=f"Processed {completed}/{total} documents..."
+                        )
+
+                    process_documents(
+                        str(raw_dir), str(processed_dir),
+                        settings=settings, masker=load_masker(),
+                        progress_callback=_update_progress,
+                    )
+                    progress_bar.progress(1.0, text="Embedding & storing...")
+                    ChromaDealStore(settings=settings).initialize_deal_store()
+                    progress_bar.empty()
+                    st.success("Analysis Engine Updated!")
+                    st.balloons()
+                except Exception as e:
+                    progress_bar.empty()
+                    st.error(f"Ingestion failed: {e}")
         except PermissionError:
             st.error("🚨 Permission Denied: UID 1000 cannot write to volume.")
         except Exception as e:

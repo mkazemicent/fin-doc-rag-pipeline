@@ -66,7 +66,7 @@ def rewrite_node(state: AgentState, *, llm=None) -> dict:
     logger.info("--- NODE: OPTIMIZING SEARCH QUERY ---")
     if llm is None:
         s = get_settings()
-        llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0)
+        llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0, num_ctx=s.num_ctx, num_gpu=s.num_gpu)
 
     question = state["question"]
     prompt = ChatPromptTemplate.from_messages([
@@ -146,7 +146,7 @@ def grade_context_node(state: AgentState, *, llm=None, max_retries=3) -> dict:
 
     if llm is None:
         s = get_settings()
-        llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0)
+        llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0, num_ctx=s.num_ctx, num_gpu=s.num_gpu)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Evaluate if the provided context is relevant to the question. Output 'yes' or 'no'."),
@@ -177,7 +177,7 @@ def generate_node(state: AgentState, *, llm=None) -> dict:
 
     if llm is None:
         s = get_settings()
-        llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0)
+        llm = ChatOllama(model=s.llm_model, base_url=s.ollama_base_url, temperature=0, num_ctx=s.num_ctx, num_gpu=s.num_gpu)
 
     structured_llm = llm.with_structured_output(DealExtraction)
 
@@ -225,7 +225,9 @@ def build_deal_analyzer(settings: Optional[Settings] = None) -> CompiledStateGra
     llm = ChatOllama(
         model=settings.llm_model,
         base_url=settings.ollama_base_url,
-        temperature=0
+        temperature=0,
+        num_ctx=settings.num_ctx,
+        num_gpu=settings.num_gpu,
     )
 
     from src.rag.chroma_deal_store import ChromaDealStore

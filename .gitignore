@@ -214,3 +214,45 @@ test_live_routing.py
 GEMINI.md
 .env.local
 test_dir/
+
+# ============================================================================
+# Terraform - SENSITIVE DATA - NEVER COMMIT
+# ============================================================================
+# State files contain secrets, API keys, database passwords, etc.
+terraform.tfstate
+terraform.tfstate.*
+terraform.tfstate.backup
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform/
+.terraform.lock.hcl
+.tfvars
+.tfvars.json
+.terraformrc
+terraform.rc
+
+# ============================================================================
+# Kubernetes - LOCAL CONFIG - NEVER COMMIT
+# ============================================================================
+# Kubeconfig files contain credentials and cluster information
+.kube/
+kubeconfig
+kubeconfig.yaml
+kubeconfig*.yml
+
+# ============================================================================
+# Environment & Secrets - NEVER COMMIT
+# ============================================================================
+.secrets
+secrets/
+*.key
+*.pem
+*.crt
+*.cert
+*.der
+*.p12
+*.pfx

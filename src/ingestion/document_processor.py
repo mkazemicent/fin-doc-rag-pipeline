@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 from .hash_tracker import IngestionTracker
@@ -7,6 +8,8 @@ from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 from src.config import Settings, get_settings
+
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 logger = logging.getLogger(__name__)
 
@@ -84,16 +87,56 @@ class PIIMasker:
         
         return anonymized_result.text
 
-def process_documents(raw_dir: str, processed_dir: str, settings: Optional[Settings] = None, masker: Optional["PIIMasker"] = None) -> None:
+def _process_single_file(
+    input_file: Path, processed_path: Path, masker: "PIIMasker"
+) -> Path:
+    """CPU-bound worker: load document (PDF/DOCX/TXT) → mask PII → write .txt.
+
+    Returns output_file path on success.
+    Raises on failure so the caller can log and continue.
+    """
+    output_file = processed_path / f"{input_file.stem}.txt"
+    suffix = input_file.suffix.lower()
+
+    if suffix == ".pdf":
+        loader = PyPDFLoader(str(input_file))
+        pages = loader.load()
+        full_text = "\n".join([page.page_content for page in pages])
+        logger.info(f"Extracted {len(pages)} page(s) from {input_file.name}. Applying PII masking...")
+    elif suffix == ".docx":
+        import docx
+        doc = docx.Document(str(input_file))
+        full_text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+        logger.info(f"Extracted {len(doc.paragraphs)} paragraph(s) from {input_file.name}. Applying PII masking...")
+    elif suffix == ".txt":
+        full_text = input_file.read_text(encoding="utf-8")
+        logger.info(f"Loaded plain text from {input_file.name}. Applying PII masking...")
+    else:
+        raise ValueError(f"Unsupported file format: {suffix}")
+
+    masked_text = masker.mask_text(full_text)
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(masked_text)
+
+    logger.info(f"Successfully processed and saved masked content to: {output_file.name}")
+    return output_file
+
+
+def process_documents(raw_dir: str, processed_dir: str, settings: Optional[Settings] = None, masker: Optional["PIIMasker"] = None, progress_callback=None) -> None:
     """
     Iterates through all PDF files in the raw directory, extracts their text,
     masks specific PII, and saves the output as .txt files in the processed directory.
+
+    CPU-bound steps (load, mask, chunk) run in parallel via ThreadPoolExecutor.
+    The hash-tracker gate and mark-as-processed steps remain sequential.
 
     Args:
         raw_dir (str): Directory path containing raw PDF documents.
         processed_dir (str): Directory path where masked text files will be saved.
         settings: Optional Settings instance; defaults to global settings.
         masker: Optional PIIMasker instance; created if not provided.
+        progress_callback: Optional callable(completed, total) for UI progress.
     """
     settings = settings or get_settings()
 
@@ -105,56 +148,58 @@ def process_documents(raw_dir: str, processed_dir: str, settings: Optional[Setti
 
     db_path = str(settings.hash_db_path)
 
-    # Find all PDF files in the raw directory
-    pdf_files = list(raw_path.glob("*.pdf"))
+    # Find all supported documents in the raw directory
+    pdf_files = [
+        f for ext in SUPPORTED_EXTENSIONS for f in raw_path.glob(f"*{ext}")
+    ]
     if not pdf_files:
-        logger.info(f"No PDF files found in {raw_dir}")
+        logger.info(f"No supported documents found in {raw_dir}")
         return
 
-    logger.info(f"Found {len(pdf_files)} PDF file(s) to process in {raw_dir}")
+    logger.info(f"Found {len(pdf_files)} document(s) to process in {raw_dir}")
 
     # Instantiate the PIIMasker with the required en_core_web_lg SpaCy model
     if masker is None:
         masker = PIIMasker(model_name="en_core_web_lg")
 
     with IngestionTracker(db_path) as tracker:
-        # Iterate through each PDF file to extract text and mask PII
+        # --- Sequential gate: determine which files need processing ---
+        files_to_process: list[tuple[Path, str]] = []
         for pdf_file in pdf_files:
-            logger.info(f"Processing started for file: {pdf_file.name}")
-
-            # --- Incremental Ingestion Gate ---
             already_processed, file_hash = tracker.check_and_hash(str(pdf_file))
             if already_processed:
                 logger.info(f"SKIPPED (already processed, unchanged): {pdf_file.name}")
                 continue
+            files_to_process.append((pdf_file, file_hash))
 
-            try:
-                # Construct the output .txt file path
-                output_file = processed_path / f"{pdf_file.stem}.txt"
+        if not files_to_process:
+            logger.info("All files already processed.")
+            return
 
-                # Load the PDF using LangChain's PyPDFLoader
-                loader = PyPDFLoader(str(pdf_file))
-                pages = loader.load()
+        total = len(files_to_process)
+        completed = 0
 
-                # Extract and combine the text from all pages in the PDF
-                full_text = "\n".join([page.page_content for page in pages])
+        # --- Fan-out CPU-bound work across threads ---
+        future_to_info: dict = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for pdf_file, file_hash in files_to_process:
+                logger.info(f"Submitting for processing: {pdf_file.name}")
+                future = executor.submit(
+                    _process_single_file, pdf_file, processed_path, masker
+                )
+                future_to_info[future] = (pdf_file, file_hash)
 
-                logger.info(f"Successfully extracted {len(pages)} page(s) from {pdf_file.name}. Applying PII masking...")
-
-                # Mask the PII in the combined text
-                masked_text = masker.mask_text(full_text)
-
-                # Save the masked text to the processed directory
-                with open(output_file, "w", encoding="utf-8") as f:
-                    f.write(masked_text)
-
-                logger.info(f"Successfully processed and saved masked content to: {output_file.name}")
-
-                # Record this file as successfully processed
-                tracker.mark_as_processed_with_hash(str(pdf_file), file_hash)
-
-            except Exception as e:
-                logger.error(f"Error processing {pdf_file.name}: {e}")
+            for future in as_completed(future_to_info):
+                pdf_file, file_hash = future_to_info[future]
+                try:
+                    future.result()
+                    tracker.mark_as_processed_with_hash(str(pdf_file), file_hash)
+                except Exception as e:
+                    logger.error(f"Error processing {pdf_file.name}: {e}")
+                finally:
+                    completed += 1
+                    if progress_callback is not None:
+                        progress_callback(completed, total)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

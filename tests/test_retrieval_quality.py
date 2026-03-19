@@ -16,7 +16,7 @@ class TestRerankerIntegration:
         """Reranker should reduce candidate count to top_n."""
         mock_retriever = MagicMock()
         candidates = [
-            Document(page_content=f"chunk {i}", metadata={"source": "deal.pdf", "access_group": "general"})
+            Document(page_content=f"Financial covenant clause {i}: This section describes credit terms and benchmark replacement provisions applicable to the Borrower under the credit agreement dated June 2024.", metadata={"source": "deal.pdf", "access_group": "general"})
             for i in range(20)
         ]
         mock_retriever.invoke.return_value = candidates
@@ -47,7 +47,7 @@ class TestRerankerIntegration:
         """When no reranker is provided, all retrieved docs should be returned."""
         mock_retriever = MagicMock()
         docs = [
-            Document(page_content=f"chunk {i}", metadata={"source": "deal.pdf", "access_group": "general"})
+            Document(page_content=f"Financial clause {i}: The Borrower shall maintain a minimum Interest Coverage Ratio of not less than 1.25 to 1.00 calculated on a rolling twelve-month basis as of each Quarterly Reporting Date pursuant to Section 6.1.", metadata={"source": "deal.pdf", "access_group": "general"})
             for i in range(8)
         ]
         mock_retriever.invoke.return_value = docs
@@ -133,7 +133,7 @@ class TestMMRRetrieverConfig:
             search_type="mmr",
             search_kwargs={
                 "k": 20,
-                "fetch_k": 80,
+                "fetch_k": 200,
                 "lambda_mult": 0.7,
             }
         )
@@ -155,7 +155,7 @@ class TestMMRRetrieverConfig:
 
         call_kwargs = mock_vs.as_retriever.call_args[1]
         assert call_kwargs["search_kwargs"]["k"] == 10
-        assert call_kwargs["search_kwargs"]["fetch_k"] == 40
+        assert call_kwargs["search_kwargs"]["fetch_k"] == 100
 
     @patch("src.rag.chroma_deal_store.Chroma")
     @patch("src.rag.chroma_deal_store.OllamaEmbeddings")

@@ -17,7 +17,7 @@ class TestMetadataIntegrity:
         metadata = {"source": "deal_v1.pdf", "access_group": "general"}
         semantic_texts = ["Short section about credit terms."]
 
-        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500)
+        chunks = size_cap_chunk(semantic_texts, metadata, max_chunk_size=1500, min_chunk_chars=0)
 
         assert len(chunks) == 1
         assert chunks[0].metadata["source"] == "deal_v1.pdf"
@@ -116,5 +116,6 @@ def test_vector_store_uses_settings():
 
         mock_embeddings.assert_called_once_with(
             model="test-embed",
-            base_url="http://test-ollama:11434"
+            base_url="http://test-ollama:11434",
+            num_ctx=8192,
         )

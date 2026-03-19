@@ -35,7 +35,10 @@ def test_full_ingestion_lifecycle(mock_splitter_class, mock_semantic_class, mock
     # SemanticChunker returns the full text as a single chunk (small enough, no re-split needed)
     mock_semantic = MagicMock()
     mock_semantic_class.return_value = mock_semantic
-    mock_semantic.split_text.return_value = ["Deal content"]
+    mock_semantic.split_text.return_value = [
+        "This credit agreement contains financial covenants and benchmark replacement provisions "
+        "for Term CORRA and Daily Compounded CORRA as applicable under Canadian securities law."
+    ]
 
     mock_splitter = MagicMock()
     mock_splitter_class.return_value = mock_splitter

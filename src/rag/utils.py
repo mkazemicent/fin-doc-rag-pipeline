@@ -48,6 +48,7 @@ def size_cap_chunk(
     chunk_size: int = 800,
     chunk_overlap: int = 150,
     separators: Optional[List[str]] = None,
+    min_chunk_chars: int = 100,
 ) -> list[Document]:
     """Apply size-cap fallback to pre-split semantic text sections.
 
@@ -73,6 +74,6 @@ def size_cap_chunk(
                 [Document(page_content=text, metadata=metadata.copy())]
             )
             chunked.extend(sub_docs)
-        elif text.strip():
+        elif text.strip() and len(text.strip()) >= min_chunk_chars:
             chunked.append(Document(page_content=text, metadata=metadata.copy()))
     return chunked

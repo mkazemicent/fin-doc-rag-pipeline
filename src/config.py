@@ -7,7 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Centralized configuration for the Deal Analyzer pipeline."""
-
+    # Provider
+    llm_provider: str = "ollama"   # "ollama" | "openai"
+    openai_api_key: str = ""
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     llm_model: str = "qwen2.5:14b"
